@@ -150,6 +150,32 @@ struct Job {
     cancelled: bool,
 }
 
+/// Link (e se playlists estão ativas) para o qual a prévia foi pedida.
+type PreviewKey = (String, bool);
+
+enum Preview {
+    None,
+    /// Espera o usuário parar de digitar antes de consultar.
+    Waiting { key: PreviewKey, since: f64 },
+    Loading { key: PreviewKey, rx: Receiver<Result<MediaInfo, String>> },
+    Ready { key: PreviewKey, info: Box<MediaInfo> },
+    Failed { key: PreviewKey, error: String },
+}
+
+impl Preview {
+    fn key(&self) -> Option<&PreviewKey> {
+        match self {
+            Preview::None => None,
+            Preview::Waiting { key, .. }
+            | Preview::Loading { key, .. }
+            | Preview::Ready { key, .. }
+            | Preview::Failed { key, .. } => Some(key),
+        }
+    }
+}
+
+const PREVIEW_DELAY_SECS: f64 = 0.6;
+
 struct App {
     settings: Settings,
     saved_settings: Settings,
@@ -170,11 +196,13 @@ struct App {
     cut_enabled: bool,
     cut_start: String,
     cut_end: String,
+    preview: Preview,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_zoom_factor(1.1);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let settings = Settings::load();
         settings.theme.apply(&cc.egui_ctx);
         let ytdlp = find_ytdlp();
@@ -200,6 +228,7 @@ impl App {
             cut_enabled: false,
             cut_start: String::new(),
             cut_end: String::new(),
+            preview: Preview::None,
         };
         app.start_version_check();
         app
@@ -210,6 +239,138 @@ impl App {
         if let Some(exe) = &self.ytdlp {
             self.version_rx = Some(check_ytdlp_version(exe.clone(), self.egui_ctx.clone()));
         }
+    }
+
+    /// Pede a prévia quando há exatamente um link e recolhe o resultado.
+    fn update_preview(&mut self, now: f64) {
+        let wanted = match self.urls().as_slice() {
+            [url] if self.ytdlp.is_some() => Some((url.clone(), self.settings.playlist)),
+            _ => None,
+        };
+        if wanted.as_ref() != self.preview.key() {
+            // Link mudou: descarta a prévia anterior (uma busca em andamento é ignorada).
+            self.preview = match wanted {
+                Some(key) => Preview::Waiting { key, since: now },
+                None => Preview::None,
+            };
+        }
+
+        self.preview = match std::mem::replace(&mut self.preview, Preview::None) {
+            Preview::Waiting { key, since } if now - since >= PREVIEW_DELAY_SECS => {
+                let exe = self.ytdlp.clone().expect("yt-dlp encontrado");
+                let rx = fetch_media_info(exe, key.0.clone(), key.1, self.egui_ctx.clone());
+                Preview::Loading { key, rx }
+            }
+            Preview::Loading { key, rx } => match rx.try_recv() {
+                Ok(Ok(info)) => Preview::Ready { key, info: Box::new(info) },
+                Ok(Err(error)) => Preview::Failed { key, error },
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Preview::Failed { key, error: "a consulta foi interrompida".to_owned() }
+                }
+                Err(mpsc::TryRecvError::Empty) => Preview::Loading { key, rx },
+            },
+            other => other,
+        };
+    }
+
+    fn preview_card(&self, ui: &mut egui::Ui) {
+        if matches!(self.preview, Preview::None) {
+            return;
+        }
+        ui.add_space(8.0);
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(6.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match &self.preview {
+                    Preview::None => {}
+                    Preview::Waiting { .. } | Preview::Loading { .. } => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.weak("Buscando informações do link…");
+                        });
+                    }
+                    Preview::Failed { error, .. } => {
+                        ui.colored_label(ui.visuals().warn_fg_color, "Não foi possível obter as informações do link.");
+                        ui.add(egui::Label::new(egui::RichText::new(error).weak().small()).wrap());
+                    }
+                    Preview::Ready { info, .. } => self.media_info_view(ui, info),
+                }
+            });
+    }
+
+    fn media_info_view(&self, ui: &mut egui::Ui, info: &MediaInfo) {
+        const THUMB: egui::Vec2 = egui::vec2(160.0, 90.0);
+        ui.horizontal_top(|ui| {
+            match &info.thumbnail {
+                Some((uri, bytes)) => {
+                    ui.add(
+                        egui::Image::from_bytes(uri.clone(), bytes.clone())
+                            .fit_to_exact_size(THUMB)
+                            .corner_radius(4.0),
+                    );
+                }
+                None => {
+                    let (rect, _) = ui.allocate_exact_size(THUMB, egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+                }
+            }
+
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&info.title).strong()).wrap());
+
+                let mut meta: Vec<String> = Vec::new();
+                if let Some(count) = info.playlist_count {
+                    meta.push(if count == 1 { "Playlist • 1 vídeo".to_owned() } else { format!("Playlist • {count} vídeos") });
+                }
+                meta.extend(info.channel.clone());
+                if let Some(d) = info.duration {
+                    meta.push(if info.playlist_count.is_some() { format!("{} no total", format_duration(d)) } else { format_duration(d) });
+                }
+                meta.extend(info.upload_date.clone());
+                if let Some(v) = info.views {
+                    meta.push(format!("{} visualizações", format_count(v)));
+                }
+                ui.weak(meta.join("  •  "));
+
+                let mut details: Vec<String> = Vec::new();
+                if info.chapters > 0 {
+                    let chapters = if info.chapters == 1 { "1 capítulo".to_owned() } else { format!("{} capítulos", info.chapters) };
+                    details.push(if self.settings.split_chapters && !self.cut_enabled {
+                        format!("{chapters} (serão separados)")
+                    } else {
+                        chapters
+                    });
+                }
+                if info.playlist_count.is_none() {
+                    // No corte, o tamanho é proporcional ao trecho.
+                    let fraction = match (self.cut_range(), info.duration) {
+                        (Ok(Some((start, end))), Some(total)) if total > 0.0 => {
+                            let end = end.map_or(total, |e| (e as f64).min(total));
+                            ((end - start as f64) / total).clamp(0.0, 1.0)
+                        }
+                        _ => 1.0,
+                    };
+                    match info.estimated_size(&self.settings) {
+                        Some(size) => {
+                            let size = (size as f64 * fraction) as u64;
+                            let suffix = if fraction < 1.0 { " (trecho)" } else { "" };
+                            details.push(format!("Tamanho aprox.: {}{suffix}", format_size(size)));
+                        }
+                        None if !info.formats.is_empty() => {
+                            details.push("Tamanho não informado para esta qualidade".to_owned());
+                        }
+                        None => {}
+                    }
+                }
+                if !details.is_empty() {
+                    ui.label(details.join("  •  "));
+                }
+            });
+        });
     }
 
     fn poll_version_check(&mut self) {
@@ -684,6 +845,7 @@ impl App {
                 .desired_width(f32::INFINITY)
                 .hint_text("Cole aqui: https://www.youtube.com/watch?v=…"),
         );
+        self.preview_card(ui);
 
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -794,7 +956,8 @@ impl eframe::App for App {
         self.poll_job();
         self.poll_version_check();
         self.handle_input(ui.ctx());
-        if self.job.is_some() {
+        self.update_preview(ui.input(|i| i.time));
+        if self.job.is_some() || matches!(self.preview, Preview::Waiting { .. } | Preview::Loading { .. }) {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }
         if self.settings != self.saved_settings {
@@ -928,24 +1091,38 @@ fn check_ytdlp_version(exe: PathBuf, ctx: egui::Context) -> Receiver<VersionInfo
     rx
 }
 
-fn installed_ytdlp_version(exe: &Path) -> Option<String> {
+/// Processo sem janela de console, com saída em UTF-8 e PATH que inclui o que o
+/// winget instalou (ffmpeg/deno), mesmo que este processo tenha o PATH antigo.
+fn background_command(exe: &Path) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.arg("--version").stdin(Stdio::null()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null())
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1");
+    if let Ok(joined) = std::env::join_paths(search_paths()) {
+        cmd.env("PATH", joined);
+    }
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    let out = cmd.output().ok()?;
+    cmd
+}
+
+fn http_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .user_agent(concat!("yt-downloader/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into()
+}
+
+fn installed_ytdlp_version(exe: &Path) -> Option<String> {
+    let out = background_command(exe).arg("--version").stderr(Stdio::null()).output().ok()?;
     let version = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     (out.status.success() && !version.is_empty()).then_some(version)
 }
 
 /// Última versão publicada no GitHub. Sem internet, simplesmente não avisa.
 fn latest_ytdlp_version() -> Option<String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
-        .user_agent(concat!("yt-downloader/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .into();
-    let mut resp = agent
+    let mut resp = http_agent()
         .get(YTDLP_LATEST_RELEASE_URL)
         .header("Accept", "application/vnd.github+json")
         .call()
@@ -989,26 +1166,313 @@ fn format_time(secs: u64) -> String {
     }
 }
 
+/// Dados mostrados na prévia de um link, antes de baixar.
+struct MediaInfo {
+    title: String,
+    channel: Option<String>,
+    /// Em segundos. Numa playlist, a soma dos vídeos.
+    duration: Option<f64>,
+    /// dd/mm/aaaa
+    upload_date: Option<String>,
+    views: Option<u64>,
+    chapters: usize,
+    /// `Some(n)` quando o link é uma playlist com n vídeos.
+    playlist_count: Option<usize>,
+    formats: Vec<FormatInfo>,
+    thumbnail_url: Option<String>,
+    /// (uri para o egui, bytes da imagem), baixada junto com as informações.
+    thumbnail: Option<(String, egui::load::Bytes)>,
+}
+
+struct FormatInfo {
+    ext: String,
+    vcodec: String,
+    acodec: String,
+    height: Option<u32>,
+    fps: f64,
+    has_video: bool,
+    has_audio: bool,
+    /// Campo `preference`: o yt-dlp o coloca à frente de qualquer outro
+    /// critério. No YouTube é negativo nas faixas de áudio dubladas; ausente = 0.
+    preference: i64,
+    /// Campo `source_preference` (99 nos formatos "Premium" do YouTube). O
+    /// extrator do YouTube o compara antes do codec.
+    source_preference: i64,
+    /// Maior no idioma original do vídeo.
+    language_preference: i64,
+    quality: f64,
+    tbr: f64,
+    abr: f64,
+    /// Formatos m3u8 costumam não informar o tamanho.
+    size: Option<u64>,
+}
+
+impl FormatInfo {
+    /// Preferência padrão do yt-dlp entre codecs de vídeo (AV1 > VP9 > H.264).
+    fn vcodec_rank(&self) -> u8 {
+        match self.vcodec.split('.').next().unwrap_or("") {
+            "av01" => 3,
+            "vp9" | "vp09" => 2,
+            "avc1" | "h264" => 1,
+            _ => 0,
+        }
+    }
+
+    /// Preferência padrão do yt-dlp entre codecs de áudio (Opus > AAC).
+    fn acodec_rank(&self) -> u8 {
+        match self.acodec.split('.').next().unwrap_or("") {
+            "opus" => 2,
+            "mp4a" | "aac" => 1,
+            _ => 0,
+        }
+    }
+}
+
+fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
+    let str_field = |key: &str| v.get(key).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_owned);
+    let entries = v.get("entries").and_then(|e| e.as_array());
+    let is_playlist = v.get("_type").and_then(|t| t.as_str()) == Some("playlist");
+
+    let duration = if is_playlist {
+        let total: f64 = entries.iter().flat_map(|e| e.iter()).filter_map(|e| e.get("duration")?.as_f64()).sum();
+        (total > 0.0).then_some(total)
+    } else {
+        v.get("duration").and_then(|d| d.as_f64())
+    };
+
+    let upload_date = str_field("upload_date")
+        .filter(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()))
+        .map(|d| format!("{}/{}/{}", &d[6..8], &d[4..6], &d[0..4]));
+
+    let mut formats: Vec<FormatInfo> = Vec::new();
+    for f in v.get("formats").and_then(|f| f.as_array()).into_iter().flatten() {
+        let get_str = |k: &str| f.get(k).and_then(|x| x.as_str()).unwrap_or("").to_owned();
+        let get_f64 = |k: &str| f.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let vcodec = get_str("vcodec");
+        let acodec = get_str("acodec");
+        formats.push(FormatInfo {
+            ext: get_str("ext"),
+            height: f.get("height").and_then(|h| h.as_u64()).map(|h| h as u32),
+            fps: get_f64("fps"),
+            has_video: !vcodec.is_empty() && vcodec != "none",
+            has_audio: !acodec.is_empty() && acodec != "none",
+            vcodec,
+            acodec,
+            preference: f.get("preference").and_then(|x| x.as_i64()).unwrap_or(0),
+            source_preference: f.get("source_preference").and_then(|x| x.as_i64()).unwrap_or(0),
+            language_preference: f.get("language_preference").and_then(|x| x.as_i64()).unwrap_or(0),
+            quality: get_f64("quality"),
+            tbr: get_f64("tbr"),
+            abr: get_f64("abr"),
+            size: f
+                .get("filesize")
+                .and_then(|x| x.as_u64())
+                .or_else(|| f.get("filesize_approx").and_then(|x| x.as_u64())),
+        });
+    }
+
+    MediaInfo {
+        title: str_field("title").unwrap_or_else(|| "(sem título)".to_owned()),
+        channel: str_field("channel").or_else(|| str_field("uploader")),
+        duration,
+        upload_date,
+        views: v.get("view_count").and_then(|x| x.as_u64()),
+        chapters: v.get("chapters").and_then(|c| c.as_array()).map_or(0, Vec::len),
+        playlist_count: is_playlist.then(|| {
+            v.get("playlist_count")
+                .and_then(|c| c.as_u64())
+                .map_or_else(|| entries.map_or(0, Vec::len), |c| c as usize)
+        }),
+        formats,
+        thumbnail_url: pick_thumbnail(v),
+        thumbnail: None,
+    }
+}
+
+/// Miniatura pequena (~320px) em formato que sabemos exibir.
+fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
+    let supported = |url: &str| {
+        let path = url.split('?').next().unwrap_or(url).to_lowercase();
+        [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| path.ends_with(e))
+    };
+    let from_list = v
+        .get("thumbnails")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|t| {
+            let url = t.get("url")?.as_str()?;
+            let width = t.get("width")?.as_u64()?;
+            supported(url).then_some((url, width))
+        })
+        .min_by_key(|(_, w)| w.abs_diff(320))
+        .map(|(url, _)| url.to_owned());
+    from_list.or_else(|| {
+        v.get("thumbnail")
+            .and_then(|t| t.as_str())
+            .filter(|u| supported(u))
+            .map(str::to_owned)
+    })
+}
+
+impl MediaInfo {
+    /// Tamanho aproximado do arquivo final com as opções atuais. Imita a ordem
+    /// em que o yt-dlp escolhe formatos no YouTube com os argumentos do app:
+    /// `preference`, depois os critérios de `-S` (resolução, mp4/m4a), depois
+    /// a ordem do extrator (qualidade, fps, `source_preference`, codec…). Na
+    /// conversão de áudio usa o bitrate de destino. `None` se o formato
+    /// escolhido não informa o tamanho (comum nos "Premium", servidos por m3u8).
+    fn estimated_size(&self, s: &Settings) -> Option<u64> {
+        use std::cmp::Ordering;
+        let by = |a: f64, b: f64| a.partial_cmp(&b).unwrap_or(Ordering::Equal);
+        let best_audio = |prefer_m4a: bool| {
+            self.formats.iter().filter(|f| f.has_audio && !f.has_video).max_by(|a, b| {
+                let m4a = |f: &FormatInfo| prefer_m4a && f.ext == "m4a";
+                a.preference
+                    .cmp(&b.preference)
+                    .then(m4a(a).cmp(&m4a(b)))
+                    .then(by(a.quality, b.quality))
+                    .then(a.source_preference.cmp(&b.source_preference))
+                    .then(a.acodec_rank().cmp(&b.acodec_rank()))
+                    .then(a.language_preference.cmp(&b.language_preference))
+                    .then(by(a.abr, b.abr))
+            })
+        };
+
+        match s.mode {
+            Mode::Video => {
+                let limit = VIDEO_QUALITIES[s.video_quality].1.unwrap_or(u32::MAX);
+                let video = self
+                    .formats
+                    .iter()
+                    .filter(|f| f.has_video && !f.has_audio)
+                    .filter(|f| f.height.is_some_and(|h| h <= limit))
+                    .max_by(|a, b| {
+                        a.preference
+                            .cmp(&b.preference)
+                            .then(a.height.cmp(&b.height))
+                            .then((a.ext == "mp4").cmp(&(b.ext == "mp4")))
+                            .then(by(a.quality, b.quality))
+                            .then(by(a.fps, b.fps))
+                            .then(a.source_preference.cmp(&b.source_preference))
+                            .then(a.vcodec_rank().cmp(&b.vcodec_rank()))
+                            .then(by(a.tbr, b.tbr))
+                    })?;
+                Some(video.size? + best_audio(true)?.size?)
+            }
+            Mode::Audio => {
+                let source = best_audio(false)?;
+                let fmt = AUDIO_FORMATS[s.audio_format].1;
+                let kbps = match fmt {
+                    "best" => return source.size,
+                    "wav" => 1411.0,
+                    // FLAC varia muito com o conteúdo; ~900 kbps é típico de música.
+                    "flac" => 900.0,
+                    _ => match AUDIO_QUALITIES[s.audio_quality].1.strip_suffix('K') {
+                        Some(k) => k.parse().ok()?,
+                        // VBR 0: MP3 fica perto de 245 kbps; Opus/AAC seguem a fonte.
+                        None if fmt == "mp3" => 245.0,
+                        None => source.abr.max(96.0),
+                    },
+                };
+                Some((kbps * 1000.0 / 8.0 * self.duration?) as u64)
+            }
+        }
+    }
+}
+
+/// Busca as informações do link com `yt-dlp -J` (e a miniatura) em segundo plano.
+fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Context) -> Receiver<Result<MediaInfo, String>> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let result = (|| {
+            let out = background_command(&exe)
+                .args([
+                    "-J",
+                    "--no-warnings",
+                    "--no-colors",
+                    "--flat-playlist",
+                    if playlist { "--yes-playlist" } else { "--no-playlist" },
+                    "--",
+                    &url,
+                ])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let msg = stderr
+                    .lines()
+                    .find_map(|l| l.strip_prefix("ERROR: "))
+                    .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
+                    .unwrap_or("o yt-dlp não retornou informações");
+                return Err(msg.trim().to_owned());
+            }
+            let json: serde_json::Value =
+                serde_json::from_slice(&out.stdout).map_err(|e| format!("resposta inválida do yt-dlp: {e}"))?;
+            let mut info = parse_media_info(&json);
+            if let Some(thumb_url) = &info.thumbnail_url {
+                info.thumbnail = download_thumbnail(thumb_url);
+            }
+            Ok(info)
+        })();
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+    rx
+}
+
+fn download_thumbnail(url: &str) -> Option<(String, egui::load::Bytes)> {
+    let mut resp = http_agent().get(url).call().ok()?;
+    let bytes = resp.body_mut().read_to_vec().ok()?;
+    // A extensão no uri ajuda o carregador de imagens a identificar o formato.
+    let ext = url.split('?').next()?.rsplit('.').next()?.to_lowercase();
+    Some((format!("bytes://thumb/{:x}.{ext}", hash_str(url)), bytes.into()))
+}
+
+fn hash_str(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+/// 3:25 ou 1:02:03
+fn format_duration(secs: f64) -> String {
+    let secs = secs.round() as u64;
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
+/// 2.814.943 (separador de milhar brasileiro)
+fn format_count(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// 2,8 MB / 1,2 GB
+fn format_size(bytes: u64) -> String {
+    let mb = bytes as f64 / 1_048_576.0;
+    let text = if mb >= 1024.0 { format!("{:.1} GB", mb / 1024.0) } else if mb >= 10.0 { format!("{mb:.0} MB") } else { format!("{mb:.1} MB") };
+    text.replace('.', ",")
+}
+
 fn find_ytdlp() -> Option<PathBuf> {
     search_paths().into_iter().map(|d| d.join("yt-dlp.exe")).find(|p| p.is_file())
 }
 
 fn spawn_process(exe: &Path, args: &[String]) -> std::io::Result<(u32, Receiver<Msg>)> {
-    let mut cmd = Command::new(exe);
-    cmd.args(args)
-        .stdin(Stdio::null())
+    let mut child = background_command(exe)
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1");
-    // Garante que o yt-dlp ache ffmpeg/deno instalados pelo winget.
-    if let Ok(joined) = std::env::join_paths(search_paths()) {
-        cmd.env("PATH", joined);
-    }
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    let mut child = cmd.spawn()?;
+        .spawn()?;
     let pid = child.id();
     let (tx, rx) = mpsc::channel();
 
@@ -1112,3 +1576,127 @@ mod tests {
         assert!(!is_newer("2026.07.30", "2026.08.19"));
     }
 }
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    fn settings(mode: Mode) -> Settings {
+        Settings { mode, ..Settings::default() }
+    }
+
+    fn fmt(ext: &str, vcodec: &str, acodec: &str, height: Option<u64>, abr: f64, size: u64) -> serde_json::Value {
+        serde_json::json!({
+            "protocol": "https", "ext": ext, "vcodec": vcodec, "acodec": acodec,
+            "height": height, "abr": abr, "tbr": abr, "filesize": size
+        })
+    }
+
+    #[test]
+    fn le_video_e_estima_tamanho() {
+        let json = serde_json::json!({
+            "_type": "video", "title": "Teste", "channel": "Canal", "duration": 100.0,
+            "upload_date": "20200616", "view_count": 2814943,
+            "chapters": [{"title": "a"}, {"title": "b"}],
+            "thumbnails": [
+                {"url": "https://x/big.jpg", "width": 1280},
+                {"url": "https://x/mq.jpg", "width": 320},
+                {"url": "https://x/small.jpg", "width": 120}
+            ],
+            "formats": [
+                fmt("m4a", "none", "mp4a.40.2", None, 128.0, 1_000),
+                fmt("webm", "none", "opus", None, 140.0, 1_200),
+                fmt("mp4", "avc1.64", "none", Some(1080), 0.0, 20_000),
+                fmt("mp4", "av01.0", "none", Some(1080), 0.0, 15_000),
+                fmt("mp4", "av01.0", "none", Some(720), 0.0, 8_000),
+                fmt("webm", "vp9", "none", Some(2160), 0.0, 90_000),
+                {"protocol": "m3u8_native", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080, "tbr": 900.0}
+            ]
+        });
+        let info = parse_media_info(&json);
+        assert_eq!(info.title, "Teste");
+        assert_eq!(info.channel.as_deref(), Some("Canal"));
+        assert_eq!(info.upload_date.as_deref(), Some("16/06/2020"));
+        assert_eq!(info.chapters, 2);
+        assert_eq!(info.playlist_count, None);
+        assert_eq!(info.formats.len(), 7);
+        assert_eq!(info.thumbnail_url.as_deref(), Some("https://x/mq.jpg"));
+
+        // Melhor: 4K VP9 + áudio m4a.
+        assert_eq!(info.estimated_size(&settings(Mode::Video)), Some(91_000));
+        // Até 1080p: prefere mp4 e AV1 (15.000) + m4a.
+        let mut s = settings(Mode::Video);
+        s.video_quality = 3;
+        assert_eq!(info.estimated_size(&s), Some(16_000));
+        // Áudio original: melhor áudio (opus 140 kbps).
+        let mut s = settings(Mode::Audio);
+        s.audio_format = 5;
+        assert_eq!(info.estimated_size(&s), Some(1_200));
+        // MP3 320 kbps por 100 s = 4.000.000 bytes.
+        s.audio_format = 0;
+        s.audio_quality = 1;
+        assert_eq!(info.estimated_size(&s), Some(4_000_000));
+    }
+
+    #[test]
+    fn formato_premium_sem_tamanho_nao_estima() {
+        // Como no YouTube: o "Premium" (source_preference 99) vence o AV1 da
+        // mesma altura; sem tamanho informado, não inventa um número.
+        let json = serde_json::json!({
+            "duration": 100.0,
+            "formats": [
+                fmt("m4a", "none", "mp4a.40.2", None, 128.0, 1_000),
+                fmt("mp4", "av01.0", "none", Some(1080), 0.0, 15_000),
+                fmt("mp4", "av01.0", "none", Some(720), 0.0, 8_000),
+                {"protocol": "m3u8_native", "ext": "mp4", "vcodec": "vp09.00.40.08", "acodec": "none",
+                 "height": 1080, "tbr": 2180.0, "source_preference": 99}
+            ]
+        });
+        let info = parse_media_info(&json);
+        assert_eq!(info.estimated_size(&settings(Mode::Video)), None);
+        let mut s = settings(Mode::Video);
+        s.video_quality = 4; // 720p: o Premium fica de fora
+        assert_eq!(info.estimated_size(&s), Some(9_000));
+    }
+
+    #[test]
+    fn prefere_faixa_de_audio_original() {
+        // Faixas dubladas têm "preference" negativo; a original não tem o campo.
+        let mut dub = fmt("m4a", "none", "mp4a.40.2", None, 200.0, 5_000);
+        dub["preference"] = serde_json::json!(-3);
+        let json = serde_json::json!({
+            "duration": 100.0,
+            "formats": [dub, fmt("m4a", "none", "mp4a.40.2", None, 128.0, 1_000)]
+        });
+        let mut s = settings(Mode::Audio);
+        s.audio_format = 5; // original
+        assert_eq!(parse_media_info(&json).estimated_size(&s), Some(1_000));
+    }
+
+    #[test]
+    fn le_playlist() {
+        let json = serde_json::json!({
+            "_type": "playlist", "title": "Lista", "uploader": "Canal", "playlist_count": 3,
+            "entries": [{"duration": 60.0}, {"duration": 90.0}, {"duration": null}],
+            "thumbnail": "https://x/a.webp"
+        });
+        let info = parse_media_info(&json);
+        assert_eq!(info.playlist_count, Some(3));
+        assert_eq!(info.channel.as_deref(), Some("Canal"));
+        assert_eq!(info.duration, Some(150.0));
+        assert_eq!(info.thumbnail_url.as_deref(), Some("https://x/a.webp"));
+    }
+
+    #[test]
+    fn formata_numeros() {
+        assert_eq!(format_count(2_814_943), "2.814.943");
+        assert_eq!(format_count(999), "999");
+        assert_eq!(format_count(1_000), "1.000");
+        assert_eq!(format_duration(79.4), "1:19");
+        assert_eq!(format_duration(3723.0), "1:02:03");
+        assert_eq!(format_size(2_936_013), "2,8 MB");
+        assert_eq!(format_size(52_428_800), "50 MB");
+        assert_eq!(format_size(1_288_490_189), "1,2 GB");
+    }
+}
+
