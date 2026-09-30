@@ -1,0 +1,17 @@
+[package]
+name = "yt-downloader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dirs = "7.0.0"
+eframe = "0.36.2"
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+winreg = "0.56.0"
+
+[profile.release]
+strip = true
+opt-level = 3
+
