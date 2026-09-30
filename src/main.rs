@@ -158,6 +158,12 @@ struct App {
     progress: f32,
     status: String,
     item_info: String,
+    egui_ctx: egui::Context,
+    version_rx: Option<Receiver<VersionInfo>>,
+    ytdlp_version: Option<String>,
+    /// Versão mais nova do yt-dlp publicada, quando for maior que a instalada.
+    update_available: Option<String>,
+    update_dismissed: bool,
 }
 
 impl App {
@@ -170,7 +176,7 @@ impl App {
             Some(_) => "Pronto.".to_owned(),
             None => "yt-dlp não encontrado — clique em \"Instalar yt-dlp\".".to_owned(),
         };
-        Self {
+        let mut app = Self {
             saved_settings: settings.clone(),
             settings,
             urls: String::new(),
@@ -180,6 +186,36 @@ impl App {
             progress: 0.0,
             status,
             item_info: String::new(),
+            egui_ctx: cc.egui_ctx.clone(),
+            version_rx: None,
+            ytdlp_version: None,
+            update_available: None,
+            update_dismissed: false,
+        };
+        app.start_version_check();
+        app
+    }
+
+    /// Consulta, em segundo plano, a versão instalada e a última publicada.
+    fn start_version_check(&mut self) {
+        if let Some(exe) = &self.ytdlp {
+            self.version_rx = Some(check_ytdlp_version(exe.clone(), self.egui_ctx.clone()));
+        }
+    }
+
+    fn poll_version_check(&mut self) {
+        let Some(rx) = &self.version_rx else { return };
+        match rx.try_recv() {
+            Ok(info) => {
+                self.update_available = match (info.latest, &info.installed) {
+                    (Some(latest), Some(installed)) if is_newer(&latest, installed) => Some(latest),
+                    _ => None,
+                };
+                self.ytdlp_version = info.installed;
+                self.version_rx = None;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => self.version_rx = None,
+            Err(mpsc::TryRecvError::Empty) => {}
         }
     }
 
@@ -282,15 +318,16 @@ impl App {
     }
 
     fn install_or_update_ytdlp(&mut self) {
-        let is_winget = self.ytdlp.as_ref().is_none_or(|p| {
-            p.to_string_lossy().to_lowercase().contains("winget")
-        });
-        let (exe, args, label): (PathBuf, Vec<String>, &str) = match (&self.ytdlp, is_winget) {
-            (Some(p), false) => (p.clone(), vec!["-U".into()], "Atualizando yt-dlp…"),
-            (existing, _) => (
+        // Atualiza com o próprio yt-dlp (-U), que baixa do GitHub — a mesma fonte
+        // usada na checagem de versão. O catálogo do winget pode demorar a receber
+        // versões novas. O winget só é usado para a primeira instalação, porque
+        // também traz FFmpeg e Deno.
+        let (exe, args, label): (PathBuf, Vec<String>, &str) = match &self.ytdlp {
+            Some(p) => (p.clone(), vec!["-U".into()], "Atualizando yt-dlp…"),
+            None => (
                 PathBuf::from("winget"),
                 [
-                    if existing.is_some() { "upgrade" } else { "install" },
+                    "install",
                     "-e",
                     "--id",
                     "yt-dlp.yt-dlp",
@@ -300,7 +337,7 @@ impl App {
                 ]
                 .map(String::from)
                 .to_vec(),
-                if existing.is_some() { "Atualizando yt-dlp via winget…" } else { "Instalando yt-dlp via winget (pode demorar)…" },
+                "Instalando yt-dlp via winget (pode demorar)…",
             ),
         };
         self.log.clear();
@@ -377,6 +414,8 @@ impl App {
                         if let Some(p) = &self.ytdlp {
                             self.push_log(format!("yt-dlp em: {}", p.display()));
                         }
+                        self.update_dismissed = false;
+                        self.start_version_check();
                     }
                     return;
                 }
@@ -473,12 +512,13 @@ impl App {
                 .response
                 .on_hover_text("Tema");
 
-                let (label, tip) = if self.ytdlp.is_some() {
-                    ("🔄  Atualizar yt-dlp", "Atualizar o yt-dlp para a versão mais recente")
-                } else {
-                    ("⬇  Instalar yt-dlp", "Instalar yt-dlp, FFmpeg e Deno via winget")
-                };
-                if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tip).clicked() {
+                // Atualizações são oferecidas pela faixa de aviso; aqui só a instalação.
+                if self.ytdlp.is_none()
+                    && ui
+                        .add_enabled(!busy, egui::Button::new("⬇  Instalar yt-dlp"))
+                        .on_hover_text("Instalar yt-dlp, FFmpeg e Deno via winget")
+                        .clicked()
+                {
                     self.install_or_update_ytdlp();
                 }
             });
@@ -602,10 +642,20 @@ impl App {
         ui.horizontal(|ui| {
             // Direita primeiro, para o status (à esquerda) truncar no espaço que sobra.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (label, color, tip) = match &self.ytdlp {
-                    Some(p) => ("yt-dlp", egui::Color32::from_rgb(60, 170, 90), p.display().to_string()),
-                    None => (
-                        "yt-dlp ausente",
+                let version = self.ytdlp_version.as_deref().unwrap_or("");
+                let (label, color, tip) = match (&self.ytdlp, &self.update_available) {
+                    (Some(p), Some(latest)) => (
+                        format!("yt-dlp {version} — atualização disponível"),
+                        ui.visuals().warn_fg_color,
+                        format!("Versão nova: {latest}\n{}", p.display()),
+                    ),
+                    (Some(p), None) => (
+                        format!("yt-dlp {version}").trim_end().to_owned(),
+                        egui::Color32::from_rgb(60, 170, 90),
+                        p.display().to_string(),
+                    ),
+                    (None, _) => (
+                        "yt-dlp ausente".to_owned(),
                         ui.visuals().error_fg_color,
                         "Use \"Instalar yt-dlp\" na barra de ferramentas".to_owned(),
                     ),
@@ -624,11 +674,35 @@ impl App {
         });
         ui.add_space(2.0);
     }
+
+    fn update_banner(&mut self, ui: &mut egui::Ui) {
+        let latest = self.update_available.clone().unwrap_or_default();
+        let installed = self.ytdlp_version.clone().unwrap_or_default();
+        let busy = self.job.is_some();
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Nova versão do yt-dlp disponível").strong());
+            ui.label(format!("{latest}  (instalada: {installed})"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("✖").on_hover_text("Dispensar").clicked() {
+                    self.update_dismissed = true;
+                }
+                if ui
+                    .add_enabled(!busy, egui::Button::new("🔄  Atualizar agora"))
+                    .on_disabled_hover_text("Aguarde o download atual terminar")
+                    .clicked()
+                {
+                    self.install_or_update_ytdlp();
+                }
+            });
+        });
+    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_job();
+        self.poll_version_check();
         self.handle_input(ui.ctx());
         if self.job.is_some() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -641,6 +715,16 @@ impl eframe::App for App {
         egui::Panel::top("toolbar")
             .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
             .show(ui, |ui| self.toolbar(ui));
+        let updating = self.job.as_ref().is_some_and(|j| j.kind == JobKind::Tooling);
+        if self.update_available.is_some() && !self.update_dismissed && !updating {
+            egui::Panel::top("update_banner")
+                .frame(
+                    egui::Frame::new()
+                        .fill(ui.visuals().warn_fg_color.gamma_multiply(0.18))
+                        .inner_margin(egui::Margin::symmetric(10, 6)),
+                )
+                .show(ui, |ui| self.update_banner(ui));
+        }
         egui::Panel::bottom("status")
             .show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("options")
@@ -735,6 +819,58 @@ fn expand_env(s: &str) -> String {
     out
 }
 
+const YTDLP_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
+
+/// Resultado da checagem de versão do yt-dlp feita em segundo plano.
+struct VersionInfo {
+    installed: Option<String>,
+    latest: Option<String>,
+}
+
+fn check_ytdlp_version(exe: PathBuf, ctx: egui::Context) -> Receiver<VersionInfo> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let installed = installed_ytdlp_version(&exe);
+        let latest = latest_ytdlp_version();
+        let _ = tx.send(VersionInfo { installed, latest });
+        ctx.request_repaint();
+    });
+    rx
+}
+
+fn installed_ytdlp_version(exe: &Path) -> Option<String> {
+    let mut cmd = Command::new(exe);
+    cmd.arg("--version").stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let out = cmd.output().ok()?;
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (out.status.success() && !version.is_empty()).then_some(version)
+}
+
+/// Última versão publicada no GitHub. Sem internet, simplesmente não avisa.
+fn latest_ytdlp_version() -> Option<String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .user_agent(concat!("yt-downloader/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into();
+    let mut resp = agent
+        .get(YTDLP_LATEST_RELEASE_URL)
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .ok()?;
+    let body = resp.body_mut().read_to_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    json.get("tag_name")?.as_str().map(str::to_owned)
+}
+
+/// Versões do yt-dlp são datas (2026.08.19), às vezes com um sufixo (.1).
+fn is_newer(latest: &str, installed: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> { s.trim().split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    parse(latest) > parse(installed)
+}
+
 fn find_ytdlp() -> Option<PathBuf> {
     search_paths().into_iter().map(|d| d.join("yt-dlp.exe")).find(|p| p.is_file())
 }
@@ -818,4 +954,19 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native("YT Downloader", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_newer;
+
+    #[test]
+    fn compara_versoes_do_ytdlp() {
+        assert!(is_newer("2026.09.02", "2026.08.19"));
+        assert!(is_newer("2026.08.19.1", "2026.08.19"));
+        assert!(is_newer("2027.01.01", "2026.12.31"));
+        assert!(!is_newer("2026.08.19", "2026.08.19"));
+        assert!(!is_newer("2026.08.19", "2026.08.19.1"));
+        assert!(!is_newer("2026.07.30", "2026.08.19"));
+    }
 }
