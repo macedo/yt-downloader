@@ -50,6 +50,23 @@ enum Mode {
     Audio,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+enum ThemeChoice {
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    fn apply(self, ctx: &egui::Context) {
+        ctx.set_theme(match self {
+            ThemeChoice::System => egui::ThemePreference::System,
+            ThemeChoice::Light => egui::ThemePreference::Light,
+            ThemeChoice::Dark => egui::ThemePreference::Dark,
+        });
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
 struct Settings {
@@ -60,6 +77,7 @@ struct Settings {
     audio_quality: usize,
     playlist: bool,
     embed_thumbnail: bool,
+    theme: ThemeChoice,
 }
 
 impl Default for Settings {
@@ -75,6 +93,7 @@ impl Default for Settings {
             audio_quality: 0,
             playlist: false,
             embed_thumbnail: true,
+            theme: ThemeChoice::System,
         }
     }
 }
@@ -145,10 +164,11 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_zoom_factor(1.1);
         let settings = Settings::load();
+        settings.theme.apply(&cc.egui_ctx);
         let ytdlp = find_ytdlp();
         let status = match &ytdlp {
-            Some(p) => format!("yt-dlp encontrado: {}", p.display()),
-            None => "yt-dlp não encontrado. Clique em \"Instalar yt-dlp\".".to_owned(),
+            Some(_) => "Pronto.".to_owned(),
+            None => "yt-dlp não encontrado — clique em \"Instalar yt-dlp\".".to_owned(),
         };
         Self {
             saved_settings: settings.clone(),
@@ -364,139 +384,252 @@ impl App {
         }
     }
 
-    fn controls(&mut self, ui: &mut egui::Ui) {
-        let busy = self.job.is_some();
+    fn open_folder(&self) {
+        let _ = Command::new("explorer").arg(&self.settings.out_dir).spawn();
+    }
 
-        ui.heading("YT Downloader");
-        ui.add_space(4.0);
+    fn choose_folder(&mut self) {
+        if let Some(dir) = rfd::FileDialog::new()
+            .set_directory(&self.settings.out_dir)
+            .pick_folder()
+        {
+            self.settings.out_dir = dir;
+        }
+    }
 
-        ui.label("Links (um por linha — vídeos ou playlists):");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.urls)
-                .desired_rows(4)
-                .desired_width(f32::INFINITY)
-                .hint_text("https://www.youtube.com/watch?v=…"),
-        );
-        ui.add_space(6.0);
-
-        ui.add_enabled_ui(!busy, |ui| {
-            egui::Grid::new("opts").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                ui.label("Baixar:");
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut self.settings.mode, Mode::Video, "🎬 Vídeo (MP4)");
-                    ui.radio_value(&mut self.settings.mode, Mode::Audio, "🎵 Somente áudio");
-                });
-                ui.end_row();
-
-                match self.settings.mode {
-                    Mode::Video => {
-                        ui.label("Qualidade:");
-                        combo(ui, "vq", &mut self.settings.video_quality, VIDEO_QUALITIES.iter().map(|q| q.0));
-                        ui.end_row();
-                    }
-                    Mode::Audio => {
-                        ui.label("Formato:");
-                        combo(ui, "af", &mut self.settings.audio_format, AUDIO_FORMATS.iter().map(|f| f.0));
-                        ui.end_row();
-
-                        let lossy = !matches!(AUDIO_FORMATS[self.settings.audio_format].1, "flac" | "wav" | "best");
-                        ui.label("Qualidade:");
-                        ui.add_enabled_ui(lossy, |ui| {
-                            combo(ui, "aq", &mut self.settings.audio_quality, AUDIO_QUALITIES.iter().map(|q| q.0));
-                        });
-                        ui.end_row();
-                    }
-                }
-
-                ui.label("Opções:");
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.settings.playlist, "Baixar playlist inteira");
-                    ui.checkbox(&mut self.settings.embed_thumbnail, "Embutir capa");
-                });
-                ui.end_row();
-
-                ui.label("Salvar em:");
-                ui.horizontal(|ui| {
-                    if ui.button("📁 Escolher…").clicked() {
-                        if let Some(dir) = rfd::FileDialog::new()
-                            .set_directory(&self.settings.out_dir)
-                            .pick_folder()
-                        {
-                            self.settings.out_dir = dir;
-                        }
-                    }
-                    ui.label(self.settings.out_dir.display().to_string());
-                });
-                ui.end_row();
-            });
+    /// Atalhos de teclado. Roda antes dos widgets para que o campo de links
+    /// não receba as mesmas teclas.
+    fn handle_input(&mut self, ctx: &egui::Context) {
+        let (start, cancel) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            )
         });
 
-        ui.add_space(8.0);
+        let busy = self.job.is_some();
+        if start && !busy && self.ytdlp.is_some() {
+            self.start_download();
+        }
+        if cancel && busy {
+            self.cancel();
+        }
+    }
+
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some();
+        let has_urls = !self.urls().is_empty();
+
         ui.horizontal(|ui| {
+            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+            ui.spacing_mut().item_spacing.x = 6.0;
+
             if busy {
-                if ui.add(egui::Button::new("⏹ Cancelar").min_size([120.0, 32.0].into())).clicked() {
+                let btn = egui::Button::new(egui::RichText::new("⏹  Cancelar").strong())
+                    .fill(ui.visuals().error_fg_color.gamma_multiply(0.35));
+                if ui.add(btn).on_hover_text("Interromper (Esc)").clicked() {
                     self.cancel();
                 }
             } else {
-                let can = self.ytdlp.is_some();
-                let btn = egui::Button::new(egui::RichText::new("⬇ Baixar").strong())
-                    .min_size([120.0, 32.0].into());
-                if ui.add_enabled(can, btn).clicked() {
-                    self.settings.save();
+                let btn = egui::Button::new(egui::RichText::new("⬇  Baixar").strong())
+                    .fill(ui.visuals().selection.bg_fill);
+                let why_disabled = if self.ytdlp.is_none() {
+                    "Instale o yt-dlp primeiro"
+                } else {
+                    "Cole um ou mais links"
+                };
+                if ui
+                    .add_enabled(self.ytdlp.is_some() && has_urls, btn)
+                    .on_hover_text("Baixar os links (Ctrl+Enter)")
+                    .on_disabled_hover_text(why_disabled)
+                    .clicked()
+                {
                     self.start_download();
                 }
             }
-            if ui.button("📂 Abrir pasta").clicked() {
-                let mut cmd = Command::new("explorer");
-                cmd.arg(&self.settings.out_dir);
-                let _ = cmd.spawn();
-            }
+
+            ui.separator();
+
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.selectable_value(&mut self.settings.mode, Mode::Video, "🎞  Vídeo")
+                    .on_hover_text("Baixar vídeo (MP4)");
+                ui.selectable_value(&mut self.settings.mode, Mode::Audio, "🎵  Áudio")
+                    .on_hover_text("Extrair somente o áudio");
+            });
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let label = if self.ytdlp.is_some() { "🔄 Atualizar yt-dlp" } else { "Instalar yt-dlp" };
-                if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                ui.menu_button("🌓", |ui| {
+                    for (choice, label) in [
+                        (ThemeChoice::System, "Seguir o sistema"),
+                        (ThemeChoice::Light, "Claro"),
+                        (ThemeChoice::Dark, "Escuro"),
+                    ] {
+                        if ui.radio_value(&mut self.settings.theme, choice, label).clicked() {
+                            choice.apply(ui.ctx());
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Tema");
+
+                let (label, tip) = if self.ytdlp.is_some() {
+                    ("🔄  Atualizar yt-dlp", "Atualizar o yt-dlp para a versão mais recente")
+                } else {
+                    ("⬇  Instalar yt-dlp", "Instalar yt-dlp, FFmpeg e Deno via winget")
+                };
+                if ui.add_enabled(!busy, egui::Button::new(label)).on_hover_text(tip).clicked() {
                     self.install_or_update_ytdlp();
                 }
             });
         });
+    }
 
-        ui.add_space(6.0);
-        let running_download = self.job.as_ref().is_some_and(|j| j.kind == JobKind::Download);
-        let bar = egui::ProgressBar::new(self.progress)
-            .show_percentage()
-            .animate(busy && (self.progress == 0.0 || !running_download));
-        ui.add(bar);
-        ui.horizontal(|ui| {
-            ui.label(&self.status);
-            if !self.item_info.is_empty() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.weak(&self.item_info);
-                });
+    fn options_panel(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some();
+        ui.add_space(10.0);
+
+        ui.add_enabled_ui(!busy, |ui| {
+            match self.settings.mode {
+                Mode::Video => {
+                    section(ui, "🎞  Vídeo");
+                    ui.label("Qualidade");
+                    combo(ui, "vq", &mut self.settings.video_quality, VIDEO_QUALITIES.iter().map(|q| q.0));
+                    ui.add_space(2.0);
+                    ui.weak("Salvo em MP4 com o melhor áudio.");
+                }
+                Mode::Audio => {
+                    section(ui, "🎵  Áudio");
+                    ui.label("Formato");
+                    combo(ui, "af", &mut self.settings.audio_format, AUDIO_FORMATS.iter().map(|f| f.0));
+                    ui.add_space(6.0);
+                    let lossy = !matches!(AUDIO_FORMATS[self.settings.audio_format].1, "flac" | "wav" | "best");
+                    ui.add_enabled_ui(lossy, |ui| {
+                        ui.label("Qualidade");
+                        combo(ui, "aq", &mut self.settings.audio_quality, AUDIO_QUALITIES.iter().map(|q| q.0));
+                    });
+                }
             }
+
+            ui.add_space(16.0);
+            section(ui, "⚙  Opções");
+            ui.checkbox(&mut self.settings.playlist, "Baixar playlist inteira")
+                .on_hover_text("Se o link fizer parte de uma playlist, baixa todos os itens");
+            ui.checkbox(&mut self.settings.embed_thumbnail, "Embutir capa")
+                .on_hover_text("Grava a miniatura do vídeo como capa do arquivo");
+
+            ui.add_space(16.0);
+            section(ui, "🗀  Destino");
+            ui.add(egui::Label::new(self.settings.out_dir.display().to_string()).wrap());
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("Alterar…").clicked() {
+                    self.choose_folder();
+                }
+                if ui.button("Abrir").clicked() {
+                    self.open_folder();
+                }
+            });
         });
     }
 
-    fn log_view(&self, ui: &mut egui::Ui) {
-        ui.label("Log:");
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            egui::ScrollArea::both()
-                .auto_shrink(false)
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    for (line, is_error) in &self.log {
-                        let mut text = egui::RichText::new(line).monospace().size(11.5);
-                        if *is_error {
-                            text = text.color(ui.visuals().error_fg_color);
-                        }
-                        ui.add(egui::Label::new(text).extend());
-                    }
+    fn main_area(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some();
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Links").strong());
+            ui.weak("um por linha — vídeos ou playlists");
+            let count = self.urls().len();
+            if count > 0 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.weak(if count == 1 { "1 link".to_owned() } else { format!("{count} links") });
                 });
+            }
         });
+        ui.add_enabled(
+            !busy,
+            egui::TextEdit::multiline(&mut self.urls)
+                .id_salt("urls")
+                .desired_rows(5)
+                .desired_width(f32::INFINITY)
+                .hint_text("Cole aqui: https://www.youtube.com/watch?v=…"),
+        );
+
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Log").strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add_enabled(!self.log.is_empty(), egui::Button::new("Limpar log").small()).clicked() {
+                    self.log.clear();
+                }
+            });
+        });
+
+        egui::Frame::new()
+            .fill(ui.visuals().extreme_bg_color)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+            .corner_radius(6.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::both()
+                    .auto_shrink(false)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        if self.log.is_empty() {
+                            ui.weak("Nenhuma atividade ainda.");
+                        }
+                        for (line, is_error) in &self.log {
+                            let mut text = egui::RichText::new(line).monospace().size(11.5);
+                            if *is_error {
+                                text = text.color(ui.visuals().error_fg_color);
+                            }
+                            ui.add(egui::Label::new(text).extend());
+                        }
+                    });
+            });
+    }
+
+    fn status_bar(&self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some();
+        let running_download = self.job.as_ref().is_some_and(|j| j.kind == JobKind::Download);
+
+        ui.add_space(6.0);
+        ui.add(
+            egui::ProgressBar::new(self.progress)
+                .desired_height(8.0)
+                .animate(busy && (self.progress == 0.0 || !running_download)),
+        );
+        ui.horizontal(|ui| {
+            // Direita primeiro, para o status (à esquerda) truncar no espaço que sobra.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (label, color, tip) = match &self.ytdlp {
+                    Some(p) => ("yt-dlp", egui::Color32::from_rgb(60, 170, 90), p.display().to_string()),
+                    None => (
+                        "yt-dlp ausente",
+                        ui.visuals().error_fg_color,
+                        "Use \"Instalar yt-dlp\" na barra de ferramentas".to_owned(),
+                    ),
+                };
+                ui.label(egui::RichText::new(label).small()).on_hover_text(&tip);
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.0, color);
+                if !self.item_info.is_empty() {
+                    ui.separator();
+                    ui.weak(&self.item_info);
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(&self.status).truncate());
+                });
+            });
+        });
+        ui.add_space(2.0);
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_job();
+        self.handle_input(ui.ctx());
         if self.job.is_some() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -505,12 +638,16 @@ impl eframe::App for App {
             self.saved_settings = self.settings.clone();
         }
 
-        egui::Panel::top("controls").show(ui, |ui| {
-            ui.add_space(6.0);
-            self.controls(ui);
-            ui.add_space(6.0);
-        });
-        egui::CentralPanel::default().show(ui, |ui| self.log_view(ui));
+        egui::Panel::top("toolbar")
+            .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
+            .show(ui, |ui| self.toolbar(ui));
+        egui::Panel::bottom("status")
+            .show(ui, |ui| self.status_bar(ui));
+        egui::Panel::left("options")
+            .resizable(false)
+            .exact_size(250.0)
+            .show(ui, |ui| self.options_panel(ui));
+        egui::CentralPanel::default().show(ui, |ui| self.main_area(ui));
     }
 
     fn on_exit(&mut self) {
@@ -521,11 +658,16 @@ impl eframe::App for App {
     }
 }
 
+fn section(ui: &mut egui::Ui, title: &str) {
+    ui.label(egui::RichText::new(title).strong().size(15.0));
+    ui.add_space(4.0);
+}
+
 fn combo<'a>(ui: &mut egui::Ui, id: &str, selected: &mut usize, items: impl Iterator<Item = &'a str> + Clone) {
     let current = items.clone().nth(*selected).unwrap_or_default();
     egui::ComboBox::from_id_salt(id)
         .selected_text(current)
-        .width(220.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (i, name) in items.enumerate() {
                 ui.selectable_value(selected, i, name);
@@ -671,8 +813,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("YT Downloader")
-            .with_inner_size([760.0, 640.0])
-            .with_min_inner_size([560.0, 480.0]),
+            .with_inner_size([940.0, 640.0])
+            .with_min_inner_size([760.0, 480.0]),
         ..Default::default()
     };
     eframe::run_native("YT Downloader", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
