@@ -19,7 +19,7 @@ O app é uma interface para o `yt-dlp`: ele monta os argumentos, acompanha o pro
 
 ## Instalação
 
-Baixe e execute o instalador `YT-Downloader-Setup-<versão>.exe`:
+Baixe o instalador `YT-Downloader-Setup-<versão>.exe` na página de [Releases](https://github.com/macedo/yt-downloader/releases) e execute-o:
 
 - Não precisa de administrador; instala para o usuário atual em `%LOCALAPPDATA%\Programs\YT Downloader`.
 - Por padrão, instala ou atualiza as dependências pelo **winget**: yt-dlp, FFmpeg e Deno. O Deno é exigido pelo YouTube atualmente.
@@ -106,11 +106,28 @@ O script compila o app em release e gera `dist\YT-Downloader-Setup-<versão>.exe
 | `src/main.rs` | Todo o app: interface, montagem dos argumentos do yt-dlp, prévia do link, checagem de versão e testes |
 | `installer/yt-downloader.iss` | Script do Inno Setup (instalação, atalhos, dependências via winget, desinstalação) |
 | `installer/build.ps1` | Compila o app e gera o instalador |
+| `.github/workflows/release.yml` | Gera e publica o instalador ao receber uma tag |
 
-### Versões
+### Lançar uma versão
 
-Cada versão tem uma tag no Git (`v0.4.0`, …). Para lançar uma versão nova:
+O lançamento é automático pelo GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)). Ao receber uma tag `vX.Y.Z`, o fluxo:
 
-1. Atualize `version` no `Cargo.toml`.
-2. Gere o instalador com o `build.ps1`.
-3. Faça o commit e crie a tag.
+1. confere se a tag bate com a `version` do `Cargo.toml` e, se não bater, para antes de publicar;
+2. roda os testes;
+3. gera o instalador;
+4. publica um **Release** no GitHub com o instalador, o arquivo `SHA256SUMS.txt` e as notas geradas a partir dos commits.
+
+Para lançar, por exemplo, a versão 0.5.0:
+
+1. Atualize `version = "0.5.0"` no `Cargo.toml` e rode `cargo build --release` para atualizar o `Cargo.lock`.
+2. Faça o commit e crie a tag:
+
+```bash
+git tag -a v0.5.0 -m "v0.5.0"
+```
+
+```bash
+git push origin main --follow-tags
+```
+
+O andamento aparece na aba **Actions** do repositório, e o instalador em **Releases**.
