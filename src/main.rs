@@ -77,6 +77,7 @@ struct Settings {
     audio_quality: usize,
     playlist: bool,
     embed_thumbnail: bool,
+    split_chapters: bool,
     theme: ThemeChoice,
 }
 
@@ -93,6 +94,7 @@ impl Default for Settings {
             audio_quality: 0,
             playlist: false,
             embed_thumbnail: true,
+            split_chapters: false,
             theme: ThemeChoice::System,
         }
     }
@@ -164,6 +166,10 @@ struct App {
     /// Versão mais nova do yt-dlp publicada, quando for maior que a instalada.
     update_available: Option<String>,
     update_dismissed: bool,
+    /// Corte de trecho: vale só para o download atual, por isso não é salvo.
+    cut_enabled: bool,
+    cut_start: String,
+    cut_end: String,
 }
 
 impl App {
@@ -191,6 +197,9 @@ impl App {
             ytdlp_version: None,
             update_available: None,
             update_dismissed: false,
+            cut_enabled: false,
+            cut_start: String::new(),
+            cut_end: String::new(),
         };
         app.start_version_check();
         app
@@ -237,8 +246,32 @@ impl App {
             .collect()
     }
 
+    /// Trecho a baixar em segundos (início, fim opcional), se o corte estiver ativo.
+    fn cut_range(&self) -> Result<Option<(u64, Option<u64>)>, &'static str> {
+        if !self.cut_enabled {
+            return Ok(None);
+        }
+        let start = parse_time(&self.cut_start).ok_or("Início inválido — use 1:30, 90 ou 1:02:03")?;
+        let end = parse_time(&self.cut_end).ok_or("Fim inválido — use 1:30, 90 ou 1:02:03")?;
+        let start = start.unwrap_or(0);
+        match end {
+            Some(end) if end <= start => Err("O fim precisa ser depois do início"),
+            None if start == 0 => Err("Informe o início e/ou o fim do trecho"),
+            _ => Ok(Some((start, end))),
+        }
+    }
+
     fn build_args(&self, urls: &[String]) -> Vec<String> {
         let s = &self.settings;
+        let cut = self.cut_range().ok().flatten();
+        let output = match cut {
+            Some((start, end)) => format!(
+                "%(title)s (trecho {}-{}).%(ext)s",
+                format_time(start),
+                end.map_or("fim".to_owned(), format_time)
+            ),
+            None => "%(title)s.%(ext)s".to_owned(),
+        };
         let mut a: Vec<String> = vec![
             "--newline".into(),
             "--no-colors".into(),
@@ -249,7 +282,7 @@ impl App {
             "-P".into(),
             s.out_dir.to_string_lossy().into_owned(),
             "-o".into(),
-            "%(title)s.%(ext)s".into(),
+            output,
             if s.playlist { "--yes-playlist" } else { "--no-playlist" }.into(),
             "--embed-metadata".into(),
         ];
@@ -290,6 +323,22 @@ impl App {
             }
         }
 
+        if let Some((start, end)) = cut {
+            a.extend([
+                "--download-sections".into(),
+                format!("*{start}-{}", end.map_or("inf".to_owned(), |e| e.to_string())),
+                // Sem isso o corte começa no quadro-chave anterior (áudio saía com
+                // segundos a mais).
+                "--force-keyframes-at-cuts".into(),
+            ]);
+        } else if s.split_chapters {
+            a.extend([
+                "--split-chapters".into(),
+                "-o".into(),
+                "chapter:%(title)s/%(section_number)02d - %(section_title)s.%(ext)s".into(),
+            ]);
+        }
+
         a.push("--".into());
         a.extend(urls.iter().cloned());
         a
@@ -305,6 +354,10 @@ impl App {
             self.status = "yt-dlp não encontrado. Instale primeiro.".into();
             return;
         };
+        if let Err(e) = self.cut_range() {
+            self.status = e.into();
+            return;
+        }
         if let Err(e) = std::fs::create_dir_all(&self.settings.out_dir) {
             self.status = format!("Não foi possível criar a pasta de destino: {e}");
             return;
@@ -389,6 +442,8 @@ impl App {
                         self.status = "Juntando vídeo e áudio…".into();
                     } else if line.starts_with("[EmbedThumbnail]") {
                         self.status = "Embutindo capa…".into();
+                    } else if line.starts_with("[SplitChapters]") {
+                        self.status = "Separando capítulos…".into();
                     }
                     self.push_log(line);
                 }
@@ -472,13 +527,16 @@ impl App {
             } else {
                 let btn = egui::Button::new(egui::RichText::new("⬇  Baixar").strong())
                     .fill(ui.visuals().selection.bg_fill);
+                let cut = self.cut_range();
                 let why_disabled = if self.ytdlp.is_none() {
                     "Instale o yt-dlp primeiro"
+                } else if let Err(e) = cut {
+                    e
                 } else {
                     "Cole um ou mais links"
                 };
                 if ui
-                    .add_enabled(self.ytdlp.is_some() && has_urls, btn)
+                    .add_enabled(self.ytdlp.is_some() && has_urls && cut.is_ok(), btn)
                     .on_hover_text("Baixar os links (Ctrl+Enter)")
                     .on_disabled_hover_text(why_disabled)
                     .clicked()
@@ -557,6 +615,38 @@ impl App {
                 .on_hover_text("Se o link fizer parte de uma playlist, baixa todos os itens");
             ui.checkbox(&mut self.settings.embed_thumbnail, "Embutir capa")
                 .on_hover_text("Grava a miniatura do vídeo como capa do arquivo");
+            ui.add_enabled(
+                !self.cut_enabled,
+                egui::Checkbox::new(&mut self.settings.split_chapters, "Separar por capítulos"),
+            )
+            .on_hover_text(
+                "Além do arquivo completo, cria um arquivo por capítulo (ex.: faixas de um álbum) \
+                 numa pasta com o nome do vídeo. Vídeos sem capítulos não são afetados.",
+            )
+            .on_disabled_hover_text("Indisponível ao baixar só um trecho");
+
+            ui.add_space(16.0);
+            section(ui, "✂  Trecho");
+            ui.checkbox(&mut self.cut_enabled, "Baixar só um trecho")
+                .on_hover_text("Vale para todos os links da lista");
+            ui.add_enabled_ui(self.cut_enabled, |ui| {
+                egui::Grid::new("cut").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                    ui.label("Início");
+                    ui.add(egui::TextEdit::singleline(&mut self.cut_start).desired_width(90.0).hint_text("0:00"));
+                    ui.end_row();
+                    ui.label("Fim");
+                    ui.add(egui::TextEdit::singleline(&mut self.cut_end).desired_width(90.0).hint_text("até o fim"));
+                    ui.end_row();
+                });
+                match self.cut_range() {
+                    Err(e) if self.cut_enabled => {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    }
+                    _ => {
+                        ui.weak("Ex.: 1:30, 90 ou 1:02:03");
+                    }
+                }
+            });
 
             ui.add_space(16.0);
             section(ui, "🗀  Destino");
@@ -871,6 +961,34 @@ fn is_newer(latest: &str, installed: &str) -> bool {
     parse(latest) > parse(installed)
 }
 
+/// Lê "90", "1:30" ou "1:02:03" como segundos. Vazio = `Some(None)`; inválido = `None`.
+fn parse_time(s: &str) -> Option<Option<u64>> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Some(None);
+    }
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() > 3 || parts.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let nums: Vec<u64> = parts.iter().map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    // Minutos e segundos depois do primeiro campo precisam ficar abaixo de 60.
+    if nums.iter().skip(1).any(|&n| n >= 60) {
+        return None;
+    }
+    Some(Some(nums.iter().fold(0, |acc, n| acc * 60 + n)))
+}
+
+/// Tempo para nome de arquivo (sem ":" que o Windows não aceita): 1m30s, 1h02m03s.
+fn format_time(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    match (h, m) {
+        (0, 0) => format!("{s}s"),
+        (0, _) => format!("{m}m{s:02}s"),
+        _ => format!("{h}h{m:02}m{s:02}s"),
+    }
+}
+
 fn find_ytdlp() -> Option<PathBuf> {
     search_paths().into_iter().map(|d| d.join("yt-dlp.exe")).find(|p| p.is_file())
 }
@@ -958,7 +1076,31 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::is_newer;
+    use super::{format_time, is_newer, parse_time};
+
+    #[test]
+    fn le_tempos_do_trecho() {
+        assert_eq!(parse_time(""), Some(None));
+        assert_eq!(parse_time("  "), Some(None));
+        assert_eq!(parse_time("90"), Some(Some(90)));
+        assert_eq!(parse_time("1:30"), Some(Some(90)));
+        assert_eq!(parse_time("01:02:03"), Some(Some(3723)));
+        assert_eq!(parse_time("75:00"), Some(Some(4500)));
+        assert_eq!(parse_time("1:60"), None);
+        assert_eq!(parse_time("1:2:3:4"), None);
+        assert_eq!(parse_time("1:"), None);
+        assert_eq!(parse_time("-5"), None);
+        assert_eq!(parse_time("1.5"), None);
+        assert_eq!(parse_time("abc"), None);
+    }
+
+    #[test]
+    fn formata_tempo_para_nome_de_arquivo() {
+        assert_eq!(format_time(0), "0s");
+        assert_eq!(format_time(45), "45s");
+        assert_eq!(format_time(90), "1m30s");
+        assert_eq!(format_time(3723), "1h02m03s");
+    }
 
     #[test]
     fn compara_versoes_do_ytdlp() {
