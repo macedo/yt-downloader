@@ -14,7 +14,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Histórico completo e tags, para montar o changelog desde a tag anterior.
           fetch-depth: 0
@@ -67,7 +67,7 @@ jobs:
           Get-Content dist/RELEASE_NOTES.md
 
       - name: Publicar Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: dist/RELEASE_NOTES.md
           files: |
