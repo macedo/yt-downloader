@@ -1,0 +1,62 @@
+# Ao enviar uma tag vX.Y.Z: testa, gera o instalador e publica um Release
+# no GitHub com o instalador e o checksum anexados.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir se a tag bate com a versão do Cargo.toml
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
+              Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($env:TAG -ne "v$cargo") {
+              Write-Error "A tag $env:TAG não bate com a versão do Cargo.toml ($cargo). Atualize o Cargo.toml e crie a tag v$cargo."
+              exit 1
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Testes
+        run: cargo test --release
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+              choco install innosetup -y --no-progress
+          }
+
+      - name: Gerar instalador
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      - name: Calcular SHA-256
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.exe | ForEach-Object {
+              "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Publicar Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
