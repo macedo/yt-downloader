@@ -1,5 +1,6 @@
 # Ao enviar uma tag vX.Y.Z: testa, gera o instalador e publica um Release
-# no GitHub com o instalador e o checksum anexados.
+# no GitHub com o changelog (commits desde a tag anterior), o instalador e o
+# checksum.
 name: Release
 
 on:
@@ -14,6 +15,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Histórico completo e tags, para montar o changelog desde a tag anterior.
+          fetch-depth: 0
 
       - name: Conferir se a tag bate com a versão do Cargo.toml
         shell: pwsh
@@ -53,10 +57,19 @@ jobs:
           } | Set-Content dist/SHA256SUMS.txt
           Get-Content dist/SHA256SUMS.txt
 
+      - name: Gerar changelog
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          ./installer/changelog.ps1 -Tag $env:TAG -Repo $env:REPO | Set-Content dist/RELEASE_NOTES.md -Encoding utf8
+          Get-Content dist/RELEASE_NOTES.md
+
       - name: Publicar Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/RELEASE_NOTES.md
           files: |
             dist/*.exe
             dist/SHA256SUMS.txt
-          generate_release_notes: true
