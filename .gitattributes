@@ -1,0 +1,7 @@
+# Store every text file with LF line endings, in the repository and in the
+# working tree (PowerShell, Inno Setup and cargo all handle LF fine).
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.exe binary
