@@ -10,6 +10,9 @@ mod process;
 mod settings;
 mod update;
 
+#[cfg(test)]
+mod live_tests;
+
 use eframe::egui;
 
 use app::App;
