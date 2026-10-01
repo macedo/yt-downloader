@@ -9,9 +9,12 @@ use eframe::egui;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+use crate::args::Part;
 use crate::clip::parse_time;
 use crate::logging;
-use crate::media::{MediaInfo, fetch_media_info, format_count, format_duration, format_size};
+use crate::media::{
+    Chapter, MediaInfo, fetch_media_info, format_count, format_duration, format_size,
+};
 use crate::process::{CREATE_NO_WINDOW, Msg, find_ytdlp, spawn_process};
 use crate::settings::{
     AUDIO_FORMATS, AUDIO_QUALITIES, Mode, Settings, ThemeChoice, VIDEO_QUALITIES,
@@ -54,6 +57,8 @@ enum Preview {
     Ready {
         key: PreviewKey,
         info: Box<MediaInfo>,
+        /// Which of `info.chapters` are picked for download.
+        picked: Vec<bool>,
     },
     Failed {
         key: PreviewKey,
@@ -169,6 +174,7 @@ impl App {
             Preview::Loading { key, rx } => match rx.try_recv() {
                 Ok(Ok(info)) => Preview::Ready {
                     key,
+                    picked: vec![false; info.chapters.len()],
                     info: Box::new(info),
                 },
                 Ok(Err(error)) => {
@@ -185,7 +191,7 @@ impl App {
         };
     }
 
-    fn preview_card(&self, ui: &mut egui::Ui) {
+    fn preview_card(&mut self, ui: &mut egui::Ui) {
         if matches!(self.preview, Preview::None) {
             return;
         }
@@ -212,12 +218,125 @@ impl App {
                         );
                         ui.add(egui::Label::new(egui::RichText::new(error).weak().small()).wrap());
                     }
-                    Preview::Ready { info, .. } => self.media_info_view(ui, info),
+                    Preview::Ready { info, picked, .. } => self.media_info_view(ui, info, picked),
                 }
+                self.chapter_list(ui);
             });
     }
 
-    fn media_info_view(&self, ui: &mut egui::Ui, info: &MediaInfo) {
+    /// Chapters of the previewed video: pick some to download only those (one
+    /// file each), or use one to fill the clip start and end.
+    fn chapter_list(&mut self, ui: &mut egui::Ui) {
+        let cut_enabled = self.cut_enabled;
+        let busy = self.job.is_some();
+        let mut use_as_clip: Option<(f64, f64)> = None;
+        {
+            let Preview::Ready { info, picked, .. } = &mut self.preview else {
+                return;
+            };
+            if info.chapters.is_empty() {
+                return;
+            }
+            let selected = picked.iter().filter(|p| **p).count();
+            ui.add_space(6.0);
+            egui::CollapsingHeader::new(format!("Chapters ({})", info.chapters.len()))
+                .id_salt("chapters")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.weak(if cut_enabled {
+                        "Turn off \"Download only a clip\" to pick chapters."
+                    } else {
+                        "Pick chapters to download only those, one file each."
+                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt("chapter-list")
+                        .max_height(170.0)
+                        .show(ui, |ui| {
+                            for (i, (chapter, pick)) in
+                                info.chapters.iter().zip(picked.iter_mut()).enumerate()
+                            {
+                                ui.horizontal(|ui| {
+                                    let label = format!("{:02}  {}", i + 1, chapter.title);
+                                    ui.add_enabled(
+                                        !cut_enabled && !busy,
+                                        egui::Checkbox::new(pick, label),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .add_enabled(
+                                                    !busy,
+                                                    egui::Button::new("Use as clip").small(),
+                                                )
+                                                .on_hover_text(
+                                                    "Fill the clip start and end with this chapter",
+                                                )
+                                                .clicked()
+                                            {
+                                                use_as_clip = Some((chapter.start, chapter.end));
+                                            }
+                                            ui.weak(format!(
+                                                "{} – {}",
+                                                format_duration(chapter.start),
+                                                format_duration(chapter.end)
+                                            ));
+                                        },
+                                    );
+                                });
+                            }
+                        });
+                    if selected > 0 {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{selected} selected"));
+                            if ui
+                                .add_enabled(!busy, egui::Button::new("Clear").small())
+                                .clicked()
+                            {
+                                picked.iter_mut().for_each(|p| *p = false);
+                            }
+                        });
+                    }
+                });
+            if use_as_clip.is_some() {
+                picked.iter_mut().for_each(|p| *p = false);
+            }
+        }
+        if let Some((start, end)) = use_as_clip {
+            // Whole seconds that cover the entire chapter.
+            self.cut_enabled = true;
+            self.cut_start = format_duration(start.floor());
+            self.cut_end = format_duration(end.ceil());
+        }
+    }
+
+    /// The chapters picked in the preview, in order.
+    fn picked_chapters(&self) -> Vec<&Chapter> {
+        match &self.preview {
+            Preview::Ready { info, picked, .. } => info
+                .chapters
+                .iter()
+                .zip(picked)
+                .filter(|(_, p)| **p)
+                .map(|(c, _)| c)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// What to download of each link: picked chapters, the clip, or all of it.
+    fn part(&self) -> Part {
+        let chapters = self.picked_chapters();
+        if !chapters.is_empty() {
+            return Part::Chapters(chapters.iter().map(|c| c.title.clone()).collect());
+        }
+        match self.cut_range() {
+            Ok(Some((start, end))) => Part::Clip { start, end },
+            _ => Part::Whole,
+        }
+    }
+
+    fn media_info_view(&self, ui: &mut egui::Ui, info: &MediaInfo, picked: &[bool]) {
         const THUMB: egui::Vec2 = egui::vec2(160.0, 90.0);
         ui.horizontal_top(|ui| {
             match &info.thumbnail {
@@ -261,11 +380,17 @@ impl App {
                 ui.weak(meta.join("  •  "));
 
                 let mut details: Vec<String> = Vec::new();
-                if info.chapters > 0 {
-                    let chapters = if info.chapters == 1 {
+                let picked_count = picked.iter().filter(|p| **p).count();
+                let total_chapters = info.chapters.len();
+                if picked_count > 0 {
+                    details.push(format!(
+                        "{picked_count} of {total_chapters} chapters selected"
+                    ));
+                } else if total_chapters > 0 {
+                    let chapters = if total_chapters == 1 {
                         "1 chapter".to_owned()
                     } else {
-                        format!("{} chapters", info.chapters)
+                        format!("{total_chapters} chapters")
                     };
                     details.push(if self.settings.split_chapters && !self.cut_enabled {
                         format!("{chapters} (will be split)")
@@ -274,18 +399,33 @@ impl App {
                     });
                 }
                 if info.playlist_count.is_none() {
-                    // When clipping, the size is proportional to the clip.
-                    let fraction = match (self.cut_range(), info.duration) {
-                        (Ok(Some((start, end))), Some(total)) if total > 0.0 => {
+                    // For a clip or picked chapters, the size is proportional
+                    // to the time downloaded.
+                    let fraction = match (self.part(), info.duration) {
+                        (Part::Clip { start, end }, Some(total)) if total > 0.0 => {
                             let end = end.map_or(total, |e| (e as f64).min(total));
                             ((end - start as f64) / total).clamp(0.0, 1.0)
+                        }
+                        (Part::Chapters(_), Some(total)) if total > 0.0 => {
+                            let picked_secs: f64 = info
+                                .chapters
+                                .iter()
+                                .zip(picked)
+                                .filter(|(_, p)| **p)
+                                .map(|(c, _)| c.end - c.start)
+                                .sum();
+                            (picked_secs / total).clamp(0.0, 1.0)
                         }
                         _ => 1.0,
                     };
                     match info.estimated_size(&self.settings) {
                         Some(size) => {
                             let size = (size as f64 * fraction) as u64;
-                            let suffix = if fraction < 1.0 { " (clip)" } else { "" };
+                            let suffix = match self.part() {
+                                Part::Clip { .. } => " (clip)",
+                                Part::Chapters(_) => " (selected chapters)",
+                                Part::Whole => "",
+                            };
                             details.push(format!("Approx. size: {}{suffix}", format_size(size)));
                         }
                         None if !info.formats.is_empty() => {
@@ -377,8 +517,7 @@ impl App {
             self.status = format!("Couldn't create the destination folder: {e}");
             return;
         }
-        let args =
-            crate::args::download_args(&self.settings, self.cut_range().ok().flatten(), &urls);
+        let args = crate::args::download_args(&self.settings, &self.part(), &urls);
         self.log.clear();
         self.push_log(format!("> yt-dlp {}", args.join(" ")));
         self.progress = 0.0;
@@ -678,20 +817,25 @@ impl App {
                 .on_hover_text("If the link is part of a playlist, download every item");
             ui.checkbox(&mut self.settings.embed_thumbnail, "Embed cover art")
                 .on_hover_text("Saves the video thumbnail as the file's cover art");
+            let chapters_picked = !self.picked_chapters().is_empty();
             ui.add_enabled(
-                !self.cut_enabled,
+                !self.cut_enabled && !chapters_picked,
                 egui::Checkbox::new(&mut self.settings.split_chapters, "Split by chapters"),
             )
             .on_hover_text(
                 "Besides the full file, creates one file per chapter (e.g. album tracks) \
                  in a folder named after the video. Videos without chapters are unaffected.",
             )
-            .on_disabled_hover_text("Unavailable when downloading a clip");
+            .on_disabled_hover_text("Unavailable when downloading a clip or picked chapters");
 
             ui.add_space(16.0);
             section(ui, "✂  Clip");
-            ui.checkbox(&mut self.cut_enabled, "Download only a clip")
-                .on_hover_text("Applies to every link in the list");
+            ui.add_enabled(
+                !chapters_picked,
+                egui::Checkbox::new(&mut self.cut_enabled, "Download only a clip"),
+            )
+            .on_hover_text("Applies to every link in the list")
+            .on_disabled_hover_text("Clear the chapter selection in the preview to cut a clip");
             ui.add_enabled_ui(self.cut_enabled, |ui| {
                 egui::Grid::new("cut")
                     .num_columns(2)
