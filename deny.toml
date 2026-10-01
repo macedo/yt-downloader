@@ -1,0 +1,11 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# The app only ships for Windows, so crates that are only pulled in for other
+# platforms (e.g. winit's Linux/Wayland and macOS backends) are not checked.
+targets = ["x86_64-pc-windows-msvc", "x86_64-pc-windows-gnu"]
+
+[bans]
+# GUI stacks routinely depend on several versions of the same crate (bitflags,
+# windows-sys…); that is not actionable here, so don't report it.
+multiple-versions = "allow"

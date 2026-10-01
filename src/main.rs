@@ -133,7 +133,11 @@ impl Settings {
 /// Messages sent from the child-process threads to the UI.
 enum Msg {
     Line(String),
-    Progress { pct: f32, speed: String, eta: String },
+    Progress {
+        pct: f32,
+        speed: String,
+        eta: String,
+    },
     Done(Option<i32>),
 }
 
@@ -156,10 +160,22 @@ type PreviewKey = (String, bool);
 enum Preview {
     None,
     /// Waits for the user to stop typing before querying.
-    Waiting { key: PreviewKey, since: f64 },
-    Loading { key: PreviewKey, rx: Receiver<Result<MediaInfo, String>> },
-    Ready { key: PreviewKey, info: Box<MediaInfo> },
-    Failed { key: PreviewKey, error: String },
+    Waiting {
+        key: PreviewKey,
+        since: f64,
+    },
+    Loading {
+        key: PreviewKey,
+        rx: Receiver<Result<MediaInfo, String>>,
+    },
+    Ready {
+        key: PreviewKey,
+        info: Box<MediaInfo>,
+    },
+    Failed {
+        key: PreviewKey,
+        error: String,
+    },
 }
 
 impl Preview {
@@ -262,11 +278,15 @@ impl App {
                 Preview::Loading { key, rx }
             }
             Preview::Loading { key, rx } => match rx.try_recv() {
-                Ok(Ok(info)) => Preview::Ready { key, info: Box::new(info) },
+                Ok(Ok(info)) => Preview::Ready {
+                    key,
+                    info: Box::new(info),
+                },
                 Ok(Err(error)) => Preview::Failed { key, error },
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    Preview::Failed { key, error: "the lookup was interrupted".to_owned() }
-                }
+                Err(mpsc::TryRecvError::Disconnected) => Preview::Failed {
+                    key,
+                    error: "the lookup was interrupted".to_owned(),
+                },
                 Err(mpsc::TryRecvError::Empty) => Preview::Loading { key, rx },
             },
             other => other,
@@ -294,7 +314,10 @@ impl App {
                         });
                     }
                     Preview::Failed { error, .. } => {
-                        ui.colored_label(ui.visuals().warn_fg_color, "Couldn't fetch the link info.");
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            "Couldn't fetch the link info.",
+                        );
                         ui.add(egui::Label::new(egui::RichText::new(error).weak().small()).wrap());
                     }
                     Preview::Ready { info, .. } => self.media_info_view(ui, info),
@@ -315,7 +338,8 @@ impl App {
                 }
                 None => {
                     let (rect, _) = ui.allocate_exact_size(THUMB, egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+                    ui.painter()
+                        .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
                 }
             }
 
@@ -324,11 +348,19 @@ impl App {
 
                 let mut meta: Vec<String> = Vec::new();
                 if let Some(count) = info.playlist_count {
-                    meta.push(if count == 1 { "Playlist • 1 video".to_owned() } else { format!("Playlist • {count} videos") });
+                    meta.push(if count == 1 {
+                        "Playlist • 1 video".to_owned()
+                    } else {
+                        format!("Playlist • {count} videos")
+                    });
                 }
                 meta.extend(info.channel.clone());
                 if let Some(d) = info.duration {
-                    meta.push(if info.playlist_count.is_some() { format!("{} total", format_duration(d)) } else { format_duration(d) });
+                    meta.push(if info.playlist_count.is_some() {
+                        format!("{} total", format_duration(d))
+                    } else {
+                        format_duration(d)
+                    });
                 }
                 meta.extend(info.upload_date.clone());
                 if let Some(v) = info.views {
@@ -338,7 +370,11 @@ impl App {
 
                 let mut details: Vec<String> = Vec::new();
                 if info.chapters > 0 {
-                    let chapters = if info.chapters == 1 { "1 chapter".to_owned() } else { format!("{} chapters", info.chapters) };
+                    let chapters = if info.chapters == 1 {
+                        "1 chapter".to_owned()
+                    } else {
+                        format!("{} chapters", info.chapters)
+                    };
                     details.push(if self.settings.split_chapters && !self.cut_enabled {
                         format!("{chapters} (will be split)")
                     } else {
@@ -479,7 +515,11 @@ impl App {
                 ]);
                 // WAV doesn't support embedded cover art.
                 if s.embed_thumbnail && fmt != "wav" {
-                    a.extend(["--embed-thumbnail".into(), "--convert-thumbnails".into(), "jpg".into()]);
+                    a.extend([
+                        "--embed-thumbnail".into(),
+                        "--convert-thumbnails".into(),
+                        "jpg".into(),
+                    ]);
                 }
             }
         }
@@ -487,7 +527,10 @@ impl App {
         if let Some((start, end)) = cut {
             a.extend([
                 "--download-sections".into(),
-                format!("*{start}-{}", end.map_or("inf".to_owned(), |e| e.to_string())),
+                format!(
+                    "*{start}-{}",
+                    end.map_or("inf".to_owned(), |e| e.to_string())
+                ),
                 // Without this the clip starts at the previous keyframe (audio came
                 // out a few seconds too long).
                 "--force-keyframes-at-cuts".into(),
@@ -563,7 +606,12 @@ impl App {
         match spawn_process(exe, args) {
             Ok((pid, rx)) => {
                 self.status = status.to_owned();
-                self.job = Some(Job { kind, pid, rx, cancelled: false });
+                self.job = Some(Job {
+                    kind,
+                    pid,
+                    rx,
+                    cancelled: false,
+                });
             }
             Err(e) => {
                 self.status = format!("Failed to start {}: {e}", exe.display());
@@ -722,7 +770,10 @@ impl App {
                         (ThemeChoice::Light, "Light"),
                         (ThemeChoice::Dark, "Dark"),
                     ] {
-                        if ui.radio_value(&mut self.settings.theme, choice, label).clicked() {
+                        if ui
+                            .radio_value(&mut self.settings.theme, choice, label)
+                            .clicked()
+                        {
                             choice.apply(ui.ctx());
                             ui.close();
                         }
@@ -753,19 +804,37 @@ impl App {
                 Mode::Video => {
                     section(ui, "🎞  Video");
                     ui.label("Quality");
-                    combo(ui, "vq", &mut self.settings.video_quality, VIDEO_QUALITIES.iter().map(|q| q.0));
+                    combo(
+                        ui,
+                        "vq",
+                        &mut self.settings.video_quality,
+                        VIDEO_QUALITIES.iter().map(|q| q.0),
+                    );
                     ui.add_space(2.0);
                     ui.weak("Saved as MP4 with the best audio.");
                 }
                 Mode::Audio => {
                     section(ui, "🎵  Audio");
                     ui.label("Format");
-                    combo(ui, "af", &mut self.settings.audio_format, AUDIO_FORMATS.iter().map(|f| f.0));
+                    combo(
+                        ui,
+                        "af",
+                        &mut self.settings.audio_format,
+                        AUDIO_FORMATS.iter().map(|f| f.0),
+                    );
                     ui.add_space(6.0);
-                    let lossy = !matches!(AUDIO_FORMATS[self.settings.audio_format].1, "flac" | "wav" | "best");
+                    let lossy = !matches!(
+                        AUDIO_FORMATS[self.settings.audio_format].1,
+                        "flac" | "wav" | "best"
+                    );
                     ui.add_enabled_ui(lossy, |ui| {
                         ui.label("Quality");
-                        combo(ui, "aq", &mut self.settings.audio_quality, AUDIO_QUALITIES.iter().map(|q| q.0));
+                        combo(
+                            ui,
+                            "aq",
+                            &mut self.settings.audio_quality,
+                            AUDIO_QUALITIES.iter().map(|q| q.0),
+                        );
                     });
                 }
             }
@@ -791,14 +860,25 @@ impl App {
             ui.checkbox(&mut self.cut_enabled, "Download only a clip")
                 .on_hover_text("Applies to every link in the list");
             ui.add_enabled_ui(self.cut_enabled, |ui| {
-                egui::Grid::new("cut").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-                    ui.label("Start");
-                    ui.add(egui::TextEdit::singleline(&mut self.cut_start).desired_width(90.0).hint_text("0:00"));
-                    ui.end_row();
-                    ui.label("End");
-                    ui.add(egui::TextEdit::singleline(&mut self.cut_end).desired_width(90.0).hint_text("to the end"));
-                    ui.end_row();
-                });
+                egui::Grid::new("cut")
+                    .num_columns(2)
+                    .spacing([8.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.label("Start");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.cut_start)
+                                .desired_width(90.0)
+                                .hint_text("0:00"),
+                        );
+                        ui.end_row();
+                        ui.label("End");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.cut_end)
+                                .desired_width(90.0)
+                                .hint_text("to the end"),
+                        );
+                        ui.end_row();
+                    });
                 match self.cut_range() {
                     Err(e) if self.cut_enabled => {
                         ui.colored_label(ui.visuals().error_fg_color, e);
@@ -833,7 +913,11 @@ impl App {
             let count = self.urls().len();
             if count > 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.weak(if count == 1 { "1 link".to_owned() } else { format!("{count} links") });
+                    ui.weak(if count == 1 {
+                        "1 link".to_owned()
+                    } else {
+                        format!("{count} links")
+                    });
                 });
             }
         });
@@ -851,7 +935,10 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Log").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(!self.log.is_empty(), egui::Button::new("Clear log").small()).clicked() {
+                if ui
+                    .add_enabled(!self.log.is_empty(), egui::Button::new("Clear log").small())
+                    .clicked()
+                {
                     self.log.clear();
                 }
             });
@@ -883,7 +970,10 @@ impl App {
 
     fn status_bar(&self, ui: &mut egui::Ui) {
         let busy = self.job.is_some();
-        let running_download = self.job.as_ref().is_some_and(|j| j.kind == JobKind::Download);
+        let running_download = self
+            .job
+            .as_ref()
+            .is_some_and(|j| j.kind == JobKind::Download);
 
         ui.add_space(6.0);
         ui.add(
@@ -912,7 +1002,8 @@ impl App {
                         "Use \"Install yt-dlp\" in the toolbar".to_owned(),
                     ),
                 };
-                ui.label(egui::RichText::new(label).small()).on_hover_text(&tip);
+                ui.label(egui::RichText::new(label).small())
+                    .on_hover_text(&tip);
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, color);
                 if !self.item_info.is_empty() {
@@ -957,8 +1048,14 @@ impl eframe::App for App {
         self.poll_version_check();
         self.handle_input(ui.ctx());
         self.update_preview(ui.input(|i| i.time));
-        if self.job.is_some() || matches!(self.preview, Preview::Waiting { .. } | Preview::Loading { .. }) {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        if self.job.is_some()
+            || matches!(
+                self.preview,
+                Preview::Waiting { .. } | Preview::Loading { .. }
+            )
+        {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
         }
         if self.settings != self.saved_settings {
             self.settings.save();
@@ -966,9 +1063,14 @@ impl eframe::App for App {
         }
 
         egui::Panel::top("toolbar")
-            .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
+            .frame(
+                egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)),
+            )
             .show(ui, |ui| self.toolbar(ui));
-        let updating = self.job.as_ref().is_some_and(|j| j.kind == JobKind::Tooling);
+        let updating = self
+            .job
+            .as_ref()
+            .is_some_and(|j| j.kind == JobKind::Tooling);
         if self.update_available.is_some() && !self.update_dismissed && !updating {
             egui::Panel::top("update_banner")
                 .frame(
@@ -978,8 +1080,7 @@ impl eframe::App for App {
                 )
                 .show(ui, |ui| self.update_banner(ui));
         }
-        egui::Panel::bottom("status")
-            .show(ui, |ui| self.status_bar(ui));
+        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("options")
             .resizable(false)
             .exact_size(250.0)
@@ -1000,7 +1101,12 @@ fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(4.0);
 }
 
-fn combo<'a>(ui: &mut egui::Ui, id: &str, selected: &mut usize, items: impl Iterator<Item = &'a str> + Clone) {
+fn combo<'a>(
+    ui: &mut egui::Ui,
+    id: &str,
+    selected: &mut usize,
+    items: impl Iterator<Item = &'a str> + Clone,
+) {
     let current = items.clone().nth(*selected).unwrap_or_default();
     egui::ComboBox::from_id_salt(id)
         .selected_text(current)
@@ -1017,7 +1123,10 @@ fn combo<'a>(ui: &mut egui::Ui, id: &str, selected: &mut usize, items: impl Iter
 /// process would only see after restarting Explorer or the session.
 fn search_paths() -> Vec<PathBuf> {
     let mut dirs_out: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         dirs_out.push(dir);
     }
     if let Some(p) = std::env::var_os("PATH") {
@@ -1029,14 +1138,22 @@ fn search_paths() -> Vec<PathBuf> {
         use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
         let sources = [
             (HKEY_CURRENT_USER, "Environment"),
-            (HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+            (
+                HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+            ),
         ];
         for (root, key) in sources {
             if let Ok(value) = RegKey::predef(root)
                 .open_subkey(key)
                 .and_then(|k| k.get_value::<String, _>("Path"))
             {
-                dirs_out.extend(value.split(';').filter(|s| !s.is_empty()).map(|s| PathBuf::from(expand_env(s))));
+                dirs_out.extend(
+                    value
+                        .split(';')
+                        .filter(|s| !s.is_empty())
+                        .map(|s| PathBuf::from(expand_env(s))),
+                );
             }
         }
     }
@@ -1115,7 +1232,11 @@ fn http_agent() -> ureq::Agent {
 }
 
 fn installed_ytdlp_version(exe: &Path) -> Option<String> {
-    let out = background_command(exe).arg("--version").stderr(Stdio::null()).output().ok()?;
+    let out = background_command(exe)
+        .arg("--version")
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
     let version = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     (out.status.success() && !version.is_empty()).then_some(version)
 }
@@ -1134,7 +1255,12 @@ fn latest_ytdlp_version() -> Option<String> {
 
 /// yt-dlp versions are dates (2026.08.19), sometimes with a suffix (.1).
 fn is_newer(latest: &str, installed: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> { s.trim().split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    let parse = |s: &str| -> Vec<u64> {
+        s.trim()
+            .split('.')
+            .map(|p| p.parse().unwrap_or(0))
+            .collect()
+    };
     parse(latest) > parse(installed)
 }
 
@@ -1145,10 +1271,17 @@ fn parse_time(s: &str) -> Option<Option<u64>> {
         return Some(None);
     }
     let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() > 3 || parts.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit())) {
+    if parts.len() > 3
+        || parts
+            .iter()
+            .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+    {
         return None;
     }
-    let nums: Vec<u64> = parts.iter().map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let nums: Vec<u64> = parts
+        .iter()
+        .map(|p| p.parse().ok())
+        .collect::<Option<_>>()?;
     // Minutes and seconds after the first field must be below 60.
     if nums.iter().skip(1).any(|&n| n >= 60) {
         return None;
@@ -1229,12 +1362,21 @@ impl FormatInfo {
 }
 
 fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
-    let str_field = |key: &str| v.get(key).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_owned);
+    let str_field = |key: &str| {
+        v.get(key)
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
     let entries = v.get("entries").and_then(|e| e.as_array());
     let is_playlist = v.get("_type").and_then(|t| t.as_str()) == Some("playlist");
 
     let duration = if is_playlist {
-        let total: f64 = entries.iter().flat_map(|e| e.iter()).filter_map(|e| e.get("duration")?.as_f64()).sum();
+        let total: f64 = entries
+            .iter()
+            .flat_map(|e| e.iter())
+            .filter_map(|e| e.get("duration")?.as_f64())
+            .sum();
         (total > 0.0).then_some(total)
     } else {
         v.get("duration").and_then(|d| d.as_f64())
@@ -1245,7 +1387,12 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
         .map(|d| format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]));
 
     let mut formats: Vec<FormatInfo> = Vec::new();
-    for f in v.get("formats").and_then(|f| f.as_array()).into_iter().flatten() {
+    for f in v
+        .get("formats")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+    {
         let get_str = |k: &str| f.get(k).and_then(|x| x.as_str()).unwrap_or("").to_owned();
         let get_f64 = |k: &str| f.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
         let vcodec = get_str("vcodec");
@@ -1259,8 +1406,14 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
             vcodec,
             acodec,
             preference: f.get("preference").and_then(|x| x.as_i64()).unwrap_or(0),
-            source_preference: f.get("source_preference").and_then(|x| x.as_i64()).unwrap_or(0),
-            language_preference: f.get("language_preference").and_then(|x| x.as_i64()).unwrap_or(0),
+            source_preference: f
+                .get("source_preference")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(0),
+            language_preference: f
+                .get("language_preference")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(0),
             quality: get_f64("quality"),
             tbr: get_f64("tbr"),
             abr: get_f64("abr"),
@@ -1277,7 +1430,10 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
         duration,
         upload_date,
         views: v.get("view_count").and_then(|x| x.as_u64()),
-        chapters: v.get("chapters").and_then(|c| c.as_array()).map_or(0, Vec::len),
+        chapters: v
+            .get("chapters")
+            .and_then(|c| c.as_array())
+            .map_or(0, Vec::len),
         playlist_count: is_playlist.then(|| {
             v.get("playlist_count")
                 .and_then(|c| c.as_u64())
@@ -1293,7 +1449,9 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
 fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
     let supported = |url: &str| {
         let path = url.split('?').next().unwrap_or(url).to_lowercase();
-        [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| path.ends_with(e))
+        [".jpg", ".jpeg", ".png", ".webp"]
+            .iter()
+            .any(|e| path.ends_with(e))
     };
     let from_list = v
         .get("thumbnails")
@@ -1326,17 +1484,20 @@ impl MediaInfo {
         use std::cmp::Ordering;
         let by = |a: f64, b: f64| a.partial_cmp(&b).unwrap_or(Ordering::Equal);
         let best_audio = |prefer_m4a: bool| {
-            self.formats.iter().filter(|f| f.has_audio && !f.has_video).max_by(|a, b| {
-                let m4a = |f: &FormatInfo| prefer_m4a && f.ext == "m4a";
-                a.preference
-                    .cmp(&b.preference)
-                    .then(m4a(a).cmp(&m4a(b)))
-                    .then(by(a.quality, b.quality))
-                    .then(a.source_preference.cmp(&b.source_preference))
-                    .then(a.acodec_rank().cmp(&b.acodec_rank()))
-                    .then(a.language_preference.cmp(&b.language_preference))
-                    .then(by(a.abr, b.abr))
-            })
+            self.formats
+                .iter()
+                .filter(|f| f.has_audio && !f.has_video)
+                .max_by(|a, b| {
+                    let m4a = |f: &FormatInfo| prefer_m4a && f.ext == "m4a";
+                    a.preference
+                        .cmp(&b.preference)
+                        .then(m4a(a).cmp(&m4a(b)))
+                        .then(by(a.quality, b.quality))
+                        .then(a.source_preference.cmp(&b.source_preference))
+                        .then(a.acodec_rank().cmp(&b.acodec_rank()))
+                        .then(a.language_preference.cmp(&b.language_preference))
+                        .then(by(a.abr, b.abr))
+                })
         };
 
         match s.mode {
@@ -1382,7 +1543,12 @@ impl MediaInfo {
 }
 
 /// Fetches the link info with `yt-dlp -J` (and the thumbnail) in the background.
-fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Context) -> Receiver<Result<MediaInfo, String>> {
+fn fetch_media_info(
+    exe: PathBuf,
+    url: String,
+    playlist: bool,
+    ctx: egui::Context,
+) -> Receiver<Result<MediaInfo, String>> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let result = (|| {
@@ -1392,7 +1558,11 @@ fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Contex
                     "--no-warnings",
                     "--no-colors",
                     "--flat-playlist",
-                    if playlist { "--yes-playlist" } else { "--no-playlist" },
+                    if playlist {
+                        "--yes-playlist"
+                    } else {
+                        "--no-playlist"
+                    },
                     "--",
                     &url,
                 ])
@@ -1407,8 +1577,8 @@ fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Contex
                     .unwrap_or("yt-dlp returned no information");
                 return Err(msg.trim().to_owned());
             }
-            let json: serde_json::Value =
-                serde_json::from_slice(&out.stdout).map_err(|e| format!("invalid response from yt-dlp: {e}"))?;
+            let json: serde_json::Value = serde_json::from_slice(&out.stdout)
+                .map_err(|e| format!("invalid response from yt-dlp: {e}"))?;
             let mut info = parse_media_info(&json);
             if let Some(thumb_url) = &info.thumbnail_url {
                 info.thumbnail = download_thumbnail(thumb_url);
@@ -1426,7 +1596,10 @@ fn download_thumbnail(url: &str) -> Option<(String, egui::load::Bytes)> {
     let bytes = resp.body_mut().read_to_vec().ok()?;
     // The extension in the uri helps the image loader detect the format.
     let ext = url.split('?').next()?.rsplit('.').next()?.to_lowercase();
-    Some((format!("bytes://thumb/{:x}.{ext}", hash_str(url)), bytes.into()))
+    Some((
+        format!("bytes://thumb/{:x}.{ext}", hash_str(url)),
+        bytes.into(),
+    ))
 }
 
 fn hash_str(s: &str) -> u64 {
@@ -1440,7 +1613,11 @@ fn hash_str(s: &str) -> u64 {
 fn format_duration(secs: f64) -> String {
     let secs = secs.round() as u64;
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 /// 2,814,943
@@ -1448,7 +1625,7 @@ fn format_count(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -1459,11 +1636,20 @@ fn format_count(n: u64) -> String {
 /// 2.8 MB / 1.2 GB
 fn format_size(bytes: u64) -> String {
     let mb = bytes as f64 / 1_048_576.0;
-    if mb >= 1024.0 { format!("{:.1} GB", mb / 1024.0) } else if mb >= 10.0 { format!("{mb:.0} MB") } else { format!("{mb:.1} MB") }
+    if mb >= 1024.0 {
+        format!("{:.1} GB", mb / 1024.0)
+    } else if mb >= 10.0 {
+        format!("{mb:.0} MB")
+    } else {
+        format!("{mb:.1} MB")
+    }
 }
 
 fn find_ytdlp() -> Option<PathBuf> {
-    search_paths().into_iter().map(|d| d.join("yt-dlp.exe")).find(|p| p.is_file())
+    search_paths()
+        .into_iter()
+        .map(|d| d.join("yt-dlp.exe"))
+        .find(|p| p.is_file())
 }
 
 fn spawn_process(exe: &Path, args: &[String]) -> std::io::Result<(u32, Receiver<Msg>)> {
@@ -1501,7 +1687,13 @@ fn read_lines(stream: impl Read, tx: &Sender<Msg>) {
         }
         let text = String::from_utf8_lossy(&buf);
         // winget uses \r to animate progress; keep only the last segment.
-        let line = text.trim_end().rsplit('\r').next().unwrap_or("").trim_end().to_owned();
+        let line = text
+            .trim_end()
+            .rsplit('\r')
+            .next()
+            .unwrap_or("")
+            .trim_end()
+            .to_owned();
         if line.trim().is_empty() {
             continue;
         }
@@ -1534,7 +1726,11 @@ fn main() -> eframe::Result {
             .with_min_inner_size([760.0, 480.0]),
         ..Default::default()
     };
-    eframe::run_native("YT Downloader", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native(
+        "YT Downloader",
+        options,
+        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+    )
 }
 
 #[cfg(test)]
@@ -1581,10 +1777,20 @@ mod preview_tests {
     use super::*;
 
     fn settings(mode: Mode) -> Settings {
-        Settings { mode, ..Settings::default() }
+        Settings {
+            mode,
+            ..Settings::default()
+        }
     }
 
-    fn fmt(ext: &str, vcodec: &str, acodec: &str, height: Option<u64>, abr: f64, size: u64) -> serde_json::Value {
+    fn fmt(
+        ext: &str,
+        vcodec: &str,
+        acodec: &str,
+        height: Option<u64>,
+        abr: f64,
+        size: u64,
+    ) -> serde_json::Value {
         serde_json::json!({
             "protocol": "https", "ext": ext, "vcodec": vcodec, "acodec": acodec,
             "height": height, "abr": abr, "tbr": abr, "filesize": size
@@ -1698,4 +1904,3 @@ mod preview_tests {
         assert_eq!(format_size(1_288_490_189), "1.2 GB");
     }
 }
-
