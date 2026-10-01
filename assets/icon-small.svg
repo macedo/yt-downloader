@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Simplified icon for 16-24 px: no sound waves or shadow, thicker strokes,
+       so the arrow stays crisp at small sizes. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7B5CFA"/>
+      <stop offset="1" stop-color="#16B4E9"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#bg)"/>
+
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 40 V150" stroke-width="40"/>
+    <path d="M76 104 L128 156 L180 104" stroke-width="40"/>
+    <path d="M60 206 H196" stroke-width="34"/>
+  </g>
+</svg>

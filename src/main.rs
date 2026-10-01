@@ -30,7 +30,11 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title(concat!("YT Downloader ", env!("CARGO_PKG_VERSION")))
             .with_inner_size([940.0, 640.0])
-            .with_min_inner_size([760.0, 480.0]),
+            .with_min_inner_size([760.0, 480.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+                    .expect("embedded window icon"),
+            ),
         ..Default::default()
     };
     let result = eframe::run_native(

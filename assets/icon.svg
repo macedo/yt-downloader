@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- YT Downloader app icon: a download arrow over a tray, with sound-wave
+       bars on each side (audio and video), on a violet-to-sky gradient tile. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7B5CFA"/>
+      <stop offset="1" stop-color="#16B4E9"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#1B1464" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#shine)"/>
+
+  <g fill="#FFFFFF" opacity="0.45">
+    <rect x="30" y="104" width="16" height="44" rx="8"/>
+    <rect x="56" y="86" width="16" height="80" rx="8"/>
+    <rect x="184" y="86" width="16" height="80" rx="8"/>
+    <rect x="210" y="104" width="16" height="44" rx="8"/>
+  </g>
+
+  <g filter="url(#shadow)" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 50 V150" stroke-width="26"/>
+    <path d="M88 112 L128 152 L168 112" stroke-width="26"/>
+    <path d="M78 196 H178" stroke-width="22"/>
+  </g>
+</svg>
