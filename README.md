@@ -4,6 +4,8 @@ A Windows app for downloading video and audio from YouTube (and other sites supp
 
 The app is a front end for `yt-dlp`: it builds the arguments, tracks progress and shows the result. Downloads and conversions are done by yt-dlp and FFmpeg.
 
+> **Not affiliated with, endorsed by or sponsored by YouTube or Google.** "YouTube" is a trademark of Google LLC; it is mentioned here only to describe what the app can download from. See [Legal](#legal).
+
 ## Features
 
 - **Video (MP4)** in qualities from "Best available" down to 360p
@@ -197,4 +199,11 @@ powershell -ExecutionPolicy Bypass -File installer\changelog.ps1 -Tag HEAD
 
 [MIT](LICENSE) © macedo. If you find it useful and we ever meet, a beer is always welcome. 🍺
 
-YT Downloader is a front end: it doesn't bundle yt-dlp, FFmpeg or Deno, which are installed separately and have their own licenses. You are responsible for respecting the terms of the sites you download from and the rights of the content's owners.
+YT Downloader is a front end: it doesn't bundle yt-dlp, FFmpeg or Deno, which are installed separately and have their own licenses.
+
+## Legal
+
+- This project is not affiliated with, endorsed by or sponsored by YouTube or Google.
+- Downloading may be restricted by a site's terms of service. YouTube's terms, for example, only allow downloads where YouTube offers them or with the rights holder's permission.
+- Copyright law applies to what you download. Only download content you own, content licensed for it (for example Creative Commons or public domain), or content you have permission to download.
+- You are responsible for how you use this app. The same notice is shown in the app under **⚙ → About YT Downloader…**.
