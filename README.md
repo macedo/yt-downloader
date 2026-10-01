@@ -122,6 +122,9 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `src/net.rs` | Shared HTTP client |
 | `src/logging.rs` | Log file in `%APPDATA%`, including crashes |
 | `src/live_tests.rs` | Checks against the real yt-dlp, FFmpeg and online videos (ignored by default) |
+| `assets/icon.svg`, `assets/icon-small.svg` | App icon (the small variant is used at 16-24 px) |
+| `assets/build-icon.ps1` | Regenerates `icon.ico` and `icon-256.png` from the SVGs (needs `cargo install resvg`) |
+| `build.rs` | Embeds the icon and version information in the executable |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
