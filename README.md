@@ -13,6 +13,7 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 - **Link preview**: when you paste a link, shows the thumbnail, title, channel, duration, chapters and approximate file size
 - **Several links** at once (one per line) and **whole playlists**
 - **Split by chapters**: one file per chapter, handy for full albums
+- **Pick chapters**: the preview lists a video's chapters; tick the ones you want to download only those (one file each, named after the chapter), or use one as the clip
 - **Download only a clip**, e.g. from `1:30` to `2:45`
 - **Cover art and metadata** embedded in the file
 - **New yt-dlp version notice** when the app opens, with one-click update

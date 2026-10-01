@@ -19,13 +19,23 @@ pub struct MediaInfo {
     /// YYYY-MM-DD
     pub upload_date: Option<String>,
     pub views: Option<u64>,
-    pub chapters: usize,
+    pub chapters: Vec<Chapter>,
     /// `Some(n)` when the link is a playlist with n videos.
     pub playlist_count: Option<usize>,
     pub formats: Vec<FormatInfo>,
     pub thumbnail_url: Option<String>,
     /// (uri for egui, image bytes), downloaded along with the info.
     pub thumbnail: Option<(String, egui::load::Bytes)>,
+}
+
+/// A chapter of the video, as listed by yt-dlp (from the description's timestamps
+/// on most sites).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chapter {
+    pub title: String,
+    /// Start and end in seconds.
+    pub start: f64,
+    pub end: f64,
 }
 
 pub struct FormatInfo {
@@ -144,7 +154,16 @@ pub fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
         chapters: v
             .get("chapters")
             .and_then(|c| c.as_array())
-            .map_or(0, Vec::len),
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                Some(Chapter {
+                    title: c.get("title")?.as_str()?.trim().to_owned(),
+                    start: c.get("start_time")?.as_f64()?,
+                    end: c.get("end_time")?.as_f64()?,
+                })
+            })
+            .collect(),
         playlist_count: is_playlist.then(|| {
             v.get("playlist_count")
                 .and_then(|c| c.as_u64())
@@ -386,7 +405,10 @@ mod tests {
         let json = serde_json::json!({
             "_type": "video", "title": "Test", "channel": "Channel", "duration": 100.0,
             "upload_date": "20200616", "view_count": 2814943,
-            "chapters": [{"title": "a"}, {"title": "b"}],
+            "chapters": [
+                {"title": "Intro", "start_time": 0.0, "end_time": 45.0},
+                {"title": " Solo ", "start_time": 45.0, "end_time": 100.0}
+            ],
             "thumbnails": [
                 {"url": "https://x/big.jpg", "width": 1280},
                 {"url": "https://x/mq.jpg", "width": 320},
@@ -406,7 +428,15 @@ mod tests {
         assert_eq!(info.title, "Test");
         assert_eq!(info.channel.as_deref(), Some("Channel"));
         assert_eq!(info.upload_date.as_deref(), Some("2020-06-16"));
-        assert_eq!(info.chapters, 2);
+        assert_eq!(info.chapters.len(), 2);
+        assert_eq!(
+            info.chapters[1],
+            Chapter {
+                title: "Solo".into(),
+                start: 45.0,
+                end: 100.0
+            }
+        );
         assert_eq!(info.playlist_count, None);
         assert_eq!(info.formats.len(), 7);
         assert_eq!(info.thumbnail_url.as_deref(), Some("https://x/mq.jpg"));

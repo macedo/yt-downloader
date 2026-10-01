@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use crate::args::download_args;
+use crate::args::{Part, download_args};
 use crate::media::parse_media_info;
 use crate::settings::{AUDIO_FORMATS, Mode, Settings, VIDEO_QUALITIES};
 
@@ -94,7 +94,11 @@ fn sample_video_url() -> &'static str {
 
 /// The app's arguments for the sample video, as a yt-dlp command line.
 fn sample_args(settings: &Settings, cut: Clip) -> Vec<String> {
-    let mut args = download_args(settings, cut, &[sample_video_url().to_owned()]);
+    let part = match cut {
+        Some((start, end)) => Part::Clip { start, end },
+        None => Part::Whole,
+    };
+    let mut args = download_args(settings, &part, &[sample_video_url().to_owned()]);
     args.insert(0, "--enable-file-urls".to_owned());
     args
 }
@@ -275,7 +279,7 @@ fn live_estimate_matches_ytdlp_format_choice() {
         for (label, settings) in cases {
             // Ask yt-dlp which formats it picks with the exact -f/-S options
             // the app passes when downloading, without downloading anything.
-            let args = download_args(&settings, None, &[url.to_string()]);
+            let args = download_args(&settings, &Part::Whole, &[url.to_string()]);
             let mut query = strings(&["--no-warnings", "-j", "--load-info-json"]);
             query.push(info_file.to_string_lossy().into_owned());
             for flag in ["-f", "-S"] {
@@ -312,5 +316,36 @@ fn live_estimate_matches_ytdlp_format_choice() {
         failures.is_empty(),
         "the size estimate no longer matches yt-dlp's format choice:\n{}",
         failures.join("\n")
+    );
+}
+
+#[test]
+#[ignore = "needs yt-dlp, FFmpeg, Deno and access to YouTube"]
+fn live_downloads_picked_chapters() {
+    // The video with chapters from VIDEOS: "An intro to video chapters",
+    // "How to set up video chapters", "See video chapters in action".
+    let url = VIDEOS[1];
+    let out = temp_dir("chapters");
+    let part = Part::Chapters(vec![
+        "How to set up video chapters".into(),
+        "See video chapters in action".into(),
+    ]);
+    let args = download_args(&settings(Mode::Audio, &out), &part, &[url.to_owned()]);
+    match ytdlp(&args) {
+        Ok(Some(_)) => {}
+        Ok(None) => panic!("YouTube asked to confirm we're not a bot; nothing was checked"),
+        Err(e) => panic!("{e}"),
+    }
+    let mut files: Vec<String> = std::fs::read_dir(&out)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            "How to Add Chapters to Your Videos Using Timestamps - 02 - How to set up video chapters.mp3",
+            "How to Add Chapters to Your Videos Using Timestamps - 03 - See video chapters in action.mp3",
+        ]
     );
 }
