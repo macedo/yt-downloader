@@ -103,7 +103,15 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 
 | Path | Contents |
 |---|---|
-| `src/main.rs` | The whole app: UI, yt-dlp argument building, link preview, version check and tests |
+| `src/main.rs` | Entry point: window options and module list |
+| `src/app.rs` | App state and the egui UI (toolbar, options panel, links, log, status bar) |
+| `src/args.rs` | Builds the yt-dlp download arguments from the settings |
+| `src/settings.rs` | User settings, quality/format lists, saved to `%APPDATA%` |
+| `src/media.rs` | Link preview: parses `yt-dlp -J` output and estimates the file size |
+| `src/process.rs` | Runs yt-dlp/winget without a console window and finds yt-dlp on the PATH |
+| `src/update.rs` | Checks GitHub for a newer yt-dlp version |
+| `src/clip.rs` | Parses clip times (`1:30`) and formats them for file names |
+| `src/net.rs` | Shared HTTP client |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
