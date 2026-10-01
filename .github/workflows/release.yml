@@ -1,35 +1,61 @@
-# On a vX.Y.Z tag push: test, build the installer and publish a GitHub Release
-# with the changelog (commits since the previous tag), the installer and its
-# checksum.
+# Releases a new version when it lands on main: if the version in Cargo.toml
+# has no vX.Y.Z tag yet, test, build the installer and publish a GitHub
+# Release (which creates the tag) with the changelog (commits since the
+# previous tag), the installer and its checksum.
+#
+# So releasing is just merging a PR that bumps the version in Cargo.toml.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# Never run two releases at once; queue them instead of cancelling.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    name: Is this a new version?
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: version
+        name: Compare Cargo.toml with the existing tags
+        run: |
+          version=$(grep -m1 -E '^version\s*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version has no tag yet; releasing it."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    name: Build and publish
+    needs: check
+    if: needs.check.outputs.release == 'true'
     runs-on: windows-latest
+    env:
+      TAG: v${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           # Full history and tags, to build the changelog since the previous tag.
           fetch-depth: 0
-
-      - name: Check that the tag matches the Cargo.toml version
-        shell: pwsh
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
-              Select-Object -First 1).Matches[0].Groups[1].Value
-          if ($env:TAG -ne "v$cargo") {
-              Write-Error "Tag $env:TAG does not match the Cargo.toml version ($cargo). Update Cargo.toml and create tag v$cargo."
-              exit 1
-          }
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -60,15 +86,20 @@ jobs:
       - name: Generate changelog
         shell: pwsh
         env:
-          TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
+          # Local tag only, so the changelog script can find the range since
+          # the previous tag; the Release step creates the real tag.
+          git tag $env:TAG $env:GITHUB_SHA
           ./installer/changelog.ps1 -Tag $env:TAG -Repo $env:REPO | Set-Content dist/RELEASE_NOTES.md -Encoding utf8
           Get-Content dist/RELEASE_NOTES.md
 
       - name: Publish Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.TAG }}
           body_path: dist/RELEASE_NOTES.md
           files: |
             dist/*.exe
