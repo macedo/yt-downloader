@@ -1,10 +1,8 @@
 # YT Downloader
 
-A Windows app for downloading video and audio from YouTube (and other sites supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp)), with a native GUI written in Rust ([egui](https://github.com/emilk/egui)).
+A feature-rich Windows app for downloading audio and video, with a native GUI written in Rust ([egui](https://github.com/emilk/egui)). It is built on [yt-dlp](https://github.com/yt-dlp/yt-dlp) and works with the sites it supports.
 
 The app is a front end for `yt-dlp`: it builds the arguments, tracks progress and shows the result. Downloads and conversions are done by yt-dlp and FFmpeg.
-
-> **Not affiliated with, endorsed by or sponsored by YouTube or Google.** "YouTube" is a trademark of Google LLC; it is mentioned here only to describe what the app can download from. See [Legal](#legal).
 
 ## Features
 
@@ -24,7 +22,7 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 Download `YT-Downloader-Setup-<version>.exe` from the [Releases](https://github.com/macedo/yt-downloader/releases) page and run it:
 
 - No admin rights needed; it installs for the current user in `%LOCALAPPDATA%\Programs\YT Downloader`.
-- By default it installs or updates the dependencies through **winget**: yt-dlp, FFmpeg and Deno. YouTube currently requires Deno.
+- By default it installs or updates the dependencies through **winget**: yt-dlp, FFmpeg and Deno (a JavaScript runtime that some sites require).
 - To update the app, run the newer installer over the current install.
 
 The installer and the app are **not digitally signed**. Because of that:
@@ -55,7 +53,7 @@ The app writes a log to `%APPDATA%\yt-downloader\logs\yt-downloader.log`: start-
 
 ### Notes
 
-- **Estimated size**: follows the same format choice as yt-dlp. For some videos YouTube doesn't report the size of the best quality ("Premium" formats); in that case the app shows "Size not reported". For MP3 VBR and FLAC the value is approximate.
+- **Estimated size**: follows the same format choice as yt-dlp. Some sites don't report the size of every format; in that case the app shows "Size not reported". For MP3 VBR and FLAC the value is approximate.
 - **Split by chapters**: yt-dlp also keeps the full file. Each chapter file gets the right name, but the title stored in its metadata is the video's title.
 - **Clips**: the clip is re-encoded so the cut is exact. For 4K videos this can take a while.
 
@@ -123,7 +121,7 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `src/clip.rs` | Parses clip times (`1:30`) and formats them for file names |
 | `src/net.rs` | Shared HTTP client |
 | `src/logging.rs` | Log file in `%APPDATA%`, including crashes |
-| `src/live_tests.rs` | Checks against the real yt-dlp, FFmpeg and YouTube (ignored by default) |
+| `src/live_tests.rs` | Checks against the real yt-dlp, FFmpeg and online videos (ignored by default) |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
@@ -156,14 +154,14 @@ Dependabot opens weekly PRs for dependency and GitHub Actions updates; merge the
 
 ### Upstream checks
 
-yt-dlp changes without notice. Every Monday, `.github/workflows/upstream.yml` runs the `tools_*` tests in `src/live_tests.rs` with the latest yt-dlp and FFmpeg. It also runs on PRs that touch `src/args.rs`. The tests use a short video generated locally, not YouTube:
+yt-dlp changes without notice. Every Monday, `.github/workflows/upstream.yml` runs the `tools_*` tests in `src/live_tests.rs` with the latest yt-dlp and FFmpeg. It also runs on PRs that touch `src/args.rs`. The tests use a short video generated locally, with no network access:
 
 - yt-dlp must accept the app's download arguments (`--simulate`, for every audio format, clips, chapters and playlists);
 - real downloads must produce the expected files (`.mp4`, `.mp3`, `.m4a`, `.wav`).
 
 If the scheduled run fails, it opens an issue labeled `upstream-check`, or comments on the open one. It can also be started by hand from the **Actions** tab.
 
-The `live_*` test checks that the link preview's size estimate picks the same formats as yt-dlp on real YouTube videos. It can't run on GitHub, because YouTube asks CI runners to prove they aren't bots, so run it by hand when needed, for example before a release. It needs yt-dlp, Deno and FFmpeg.
+The `live_*` test checks that the link preview's size estimate picks the same formats as yt-dlp on real online videos. It can't run on GitHub, because video sites often block CI runners as bots, so run it by hand when needed, for example before a release. It needs yt-dlp, Deno and FFmpeg.
 
 ```bash
 cargo test --release -- --ignored tools_
@@ -203,7 +201,7 @@ YT Downloader is a front end: it doesn't bundle yt-dlp, FFmpeg or Deno, which ar
 
 ## Legal
 
-- This project is not affiliated with, endorsed by or sponsored by YouTube or Google.
-- Downloading may be restricted by a site's terms of service. YouTube's terms, for example, only allow downloads where YouTube offers them or with the rights holder's permission.
+- This project is not affiliated with, endorsed by or sponsored by any of the sites it can download from.
+- Downloading may be restricted by a site's terms of service; check them before downloading.
 - Copyright law applies to what you download. Only download content you own, content licensed for it (for example Creative Commons or public domain), or content you have permission to download.
 - You are responsible for how you use this app. The same notice is shown in the app under **⚙ → About YT Downloader…**.

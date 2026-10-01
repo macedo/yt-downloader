@@ -866,7 +866,7 @@ impl App {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Not affiliated with, endorsed by or sponsored by YouTube or Google.",
+                            "Not affiliated with, endorsed by or sponsored by any of the sites it can download from.",
                         )
                         .strong(),
                     )
