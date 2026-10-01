@@ -1,24 +1,36 @@
-//! Live checks against the real yt-dlp and YouTube.
+//! Checks against the real yt-dlp, FFmpeg and YouTube.
 //!
-//! They need network access and yt-dlp (plus Deno, which YouTube requires,
-//! and FFmpeg), so they are `#[ignore]`d. CI runs them weekly through
-//! `.github/workflows/upstream.yml`. To run them locally:
+//! They need external tools, so they are `#[ignore]`d and run explicitly:
 //!
-//! ```text
-//! cargo test --release -- --ignored live_
-//! ```
+//! - `tools_*`: yt-dlp and FFmpeg on a short video generated locally. No
+//!   internet needed. CI runs them weekly with the latest yt-dlp
+//!   (`.github/workflows/upstream.yml`):
 //!
-//! Set `YTDLP` to the path of a specific yt-dlp executable; otherwise the one
-//! on the PATH is used.
+//!   ```text
+//!   cargo test --release -- --ignored tools_
+//!   ```
+//!
+//! - `live_*`: the real YouTube. YouTube asks datacenter IPs (such as CI
+//!   runners) to prove they aren't bots, so these run weekly on the
+//!   maintainer's PC instead (`tools/live-check.ps1`):
+//!
+//!   ```text
+//!   cargo test --release -- --ignored live_
+//!   ```
+//!
+//! Set `YTDLP` / `FFMPEG` to use specific executables; otherwise the ones on
+//! the PATH are used.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use crate::args::download_args;
 use crate::media::parse_media_info;
 use crate::settings::{AUDIO_FORMATS, Mode, Settings, VIDEO_QUALITIES};
 
-/// Long-lived videos with different format sets: an old 240p video, one with
-/// chapters and a "Premium" 1080p format, and a 4K music video.
+/// Long-lived YouTube videos with different format sets: an old 240p video,
+/// one with chapters and a "Premium" 1080p format, and a 4K music video.
 const VIDEOS: &[&str] = &[
     "https://www.youtube.com/watch?v=jNQXAC9IVRw",
     "https://www.youtube.com/watch?v=b1Fo_M_tj6w",
@@ -28,18 +40,18 @@ const VIDEOS: &[&str] = &[
 /// Clip passed to `download_args`: start and optional end, in seconds.
 type Clip = Option<(u64, Option<u64>)>;
 
-/// Video with chapters, used to check the download arguments.
-const CHAPTERS_VIDEO: &str = "https://www.youtube.com/watch?v=b1Fo_M_tj6w";
-
 fn strings(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| s.to_string()).collect()
 }
 
+fn tool(env: &str, default: &str) -> String {
+    std::env::var(env).unwrap_or_else(|_| default.to_owned())
+}
+
 /// Runs yt-dlp and returns its stdout. `Ok(None)` means YouTube asked to
-/// confirm we're not a bot (common on CI runners' IP addresses), which says
-/// nothing about this app, so callers skip instead of failing.
+/// confirm we're not a bot, which says nothing about this app.
 fn ytdlp(args: &[String]) -> Result<Option<String>, String> {
-    let exe = std::env::var("YTDLP").unwrap_or_else(|_| "yt-dlp".to_owned());
+    let exe = tool("YTDLP", "yt-dlp");
     let out = Command::new(&exe)
         .args(args)
         .output()
@@ -54,9 +66,150 @@ fn ytdlp(args: &[String]) -> Result<Option<String>, String> {
     }
 }
 
-/// Shows up as a warning annotation in the GitHub Actions run.
-fn warn_bot_check(url: &str) {
-    println!("::warning::YouTube asked to confirm we're not a bot for {url}; skipped it");
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join("yt-downloader-tests").join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
+/// A 5-second video with an audio track, generated once with FFmpeg, as a
+/// `file://` URL that yt-dlp can "download" with `--enable-file-urls`.
+fn sample_video_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| {
+        let path = temp_dir("sample").join("sample.mp4");
+        let status = Command::new(tool("FFMPEG", "ffmpeg"))
+            .args(["-v", "error", "-f", "lavfi", "-i"])
+            .arg("testsrc=duration=5:size=320x240:rate=25")
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=5"])
+            .args(["-c:v", "libx264", "-c:a", "aac", "-shortest"])
+            .arg(&path)
+            .status()
+            .expect("run ffmpeg to create the sample video");
+        assert!(status.success(), "ffmpeg could not create the sample video");
+        format!("file:///{}", path.to_string_lossy().replace('\\', "/"))
+    })
+}
+
+/// The app's arguments for the sample video, as a yt-dlp command line.
+fn sample_args(settings: &Settings, cut: Clip) -> Vec<String> {
+    let mut args = download_args(settings, cut, &[sample_video_url().to_owned()]);
+    args.insert(0, "--enable-file-urls".to_owned());
+    args
+}
+
+fn audio_format(ext: &str) -> usize {
+    AUDIO_FORMATS.iter().position(|f| f.1 == ext).unwrap()
+}
+
+fn settings(mode: Mode, out_dir: &Path) -> Settings {
+    Settings {
+        mode,
+        out_dir: out_dir.to_owned(),
+        ..Settings::default()
+    }
+}
+
+#[test]
+#[ignore = "needs yt-dlp and FFmpeg"]
+fn tools_ytdlp_accepts_download_args() {
+    let out = temp_dir("accepts");
+    let mut cases: Vec<(String, Settings, Clip)> = vec![
+        (
+            "video, best quality".into(),
+            settings(Mode::Video, &out),
+            None,
+        ),
+        (
+            "video, 720p, whole playlist".into(),
+            Settings {
+                video_quality: 4,
+                playlist: true,
+                ..settings(Mode::Video, &out)
+            },
+            None,
+        ),
+        (
+            "video, clip".into(),
+            settings(Mode::Video, &out),
+            Some((1, Some(3))),
+        ),
+        (
+            "audio, clip to the end".into(),
+            settings(Mode::Audio, &out),
+            Some((2, None)),
+        ),
+        (
+            "audio, split by chapters".into(),
+            Settings {
+                split_chapters: true,
+                ..settings(Mode::Audio, &out)
+            },
+            None,
+        ),
+    ];
+    for (i, (label, _)) in AUDIO_FORMATS.iter().enumerate() {
+        let s = Settings {
+            audio_format: i,
+            ..settings(Mode::Audio, &out)
+        };
+        cases.push((format!("audio, {label}"), s, None));
+    }
+
+    let mut failures = Vec::new();
+    for (label, settings, cut) in cases {
+        // Validates every option without downloading anything.
+        let mut args = sample_args(&settings, cut);
+        args.insert(0, "--simulate".to_owned());
+        if let Err(e) = ytdlp(&args) {
+            failures.push(format!("[{label}] {e}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "yt-dlp rejected the app's download arguments:\n{}",
+        failures.join("\n\n")
+    );
+}
+
+#[test]
+#[ignore = "needs yt-dlp and FFmpeg"]
+fn tools_downloads_produce_the_expected_files() {
+    // Clips can't be tested here: yt-dlp only cuts streams downloaded over
+    // the network, not local files.
+    let cases = [
+        ("video", Mode::Video, "mp4", "sample.mp4"),
+        ("audio, MP3", Mode::Audio, "mp3", "sample.mp3"),
+        ("audio, M4A", Mode::Audio, "m4a", "sample.m4a"),
+        ("audio, WAV", Mode::Audio, "wav", "sample.wav"),
+    ];
+    let mut failures = Vec::new();
+    for (label, mode, ext, expected) in cases {
+        // A folder per case: audio extraction deletes the intermediate .mp4.
+        let out = temp_dir(&format!("download-{ext}"));
+        let mut s = settings(mode, &out);
+        if mode == Mode::Audio {
+            s.audio_format = audio_format(ext);
+        }
+        if let Err(e) = ytdlp(&sample_args(&s, None)) {
+            failures.push(format!("[{label}] {e}"));
+            continue;
+        }
+        let mut files: Vec<String> = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        if files != [expected] {
+            failures.push(format!("[{label}] expected only {expected}, got {files:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "downloads didn't produce the expected files:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// Every value that follows `flag` in `args`.
@@ -81,24 +234,20 @@ fn picked_size(picked: &serde_json::Value) -> Option<u64> {
     }
 }
 
-fn temp_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("yt-downloader-live-tests");
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
 #[test]
-#[ignore = "needs network access and yt-dlp"]
+#[ignore = "needs yt-dlp, Deno and access to YouTube"]
 fn live_estimate_matches_ytdlp_format_choice() {
-    let info_file = temp_dir().join("info.json");
+    let info_file = temp_dir("estimate").join("info.json");
     let mut failures = Vec::new();
+    let mut checked = 0;
 
     for url in VIDEOS {
         let Some(json) = ytdlp(&strings(&["-J", "--no-warnings", "--no-playlist", url])).unwrap()
         else {
-            warn_bot_check(url);
+            println!("YouTube asked to confirm we're not a bot for {url}; skipped it");
             continue;
         };
+        checked += 1;
         let info = parse_media_info(&serde_json::from_str(&json).expect("yt-dlp -J output"));
         std::fs::write(&info_file, &json).expect("write info.json");
 
@@ -114,12 +263,11 @@ fn live_estimate_matches_ytdlp_format_choice() {
                 (format!("video, {label}"), s)
             })
             .collect();
-        let original = AUDIO_FORMATS.iter().position(|f| f.1 == "best").unwrap();
         cases.push((
             "audio, original format".to_owned(),
             Settings {
                 mode: Mode::Audio,
-                audio_format: original,
+                audio_format: audio_format("best"),
                 ..Settings::default()
             },
         ));
@@ -154,78 +302,15 @@ fn live_estimate_matches_ytdlp_format_choice() {
         }
     }
 
+    // A run where YouTube blocked every video tested nothing: fail instead of
+    // passing silently.
+    assert!(
+        checked > 0,
+        "YouTube asked to confirm we're not a bot for every video; nothing was checked"
+    );
     assert!(
         failures.is_empty(),
         "the size estimate no longer matches yt-dlp's format choice:\n{}",
         failures.join("\n")
-    );
-}
-
-#[test]
-#[ignore = "needs network access and yt-dlp"]
-fn live_ytdlp_accepts_download_args() {
-    let out_dir = temp_dir();
-    let base = |mode| Settings {
-        mode,
-        out_dir: out_dir.clone(),
-        ..Settings::default()
-    };
-    let audio_format = |ext: &str| AUDIO_FORMATS.iter().position(|f| f.1 == ext).unwrap();
-
-    let cases: Vec<(&str, Settings, Clip)> = vec![
-        ("video, best quality", base(Mode::Video), None),
-        (
-            "video, 720p, whole playlist",
-            Settings {
-                video_quality: 4,
-                playlist: true,
-                ..base(Mode::Video)
-            },
-            None,
-        ),
-        ("audio, MP3", base(Mode::Audio), None),
-        (
-            "audio, WAV",
-            Settings {
-                audio_format: audio_format("wav"),
-                ..base(Mode::Audio)
-            },
-            None,
-        ),
-        ("video, clip", base(Mode::Video), Some((10, Some(20)))),
-        (
-            "audio, clip to the end",
-            base(Mode::Audio),
-            Some((60, None)),
-        ),
-        (
-            "audio, split by chapters",
-            Settings {
-                split_chapters: true,
-                ..base(Mode::Audio)
-            },
-            None,
-        ),
-    ];
-
-    let mut failures = Vec::new();
-    for (label, settings, cut) in cases {
-        let mut args = download_args(&settings, cut, &[CHAPTERS_VIDEO.to_owned()]);
-        // Run everything except the actual download.
-        args.insert(0, "--simulate".to_owned());
-        match ytdlp(&args) {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                warn_bot_check(CHAPTERS_VIDEO);
-                return;
-            }
-            Err(e) => failures.push(format!("[{label}] {e}")),
-        }
-    }
-
-    assert!(
-        failures.is_empty(),
-        "yt-dlp rejected the app's download arguments:\n{}",
-        failures.join("\n\n")
     );
 }
