@@ -4,6 +4,8 @@ A feature-rich Windows app for downloading audio and video, with a native GUI wr
 
 The app is a front end for `yt-dlp`: it builds the arguments, tracks progress and shows the result. Downloads and conversions are done by yt-dlp and FFmpeg.
 
+![YT Downloader showing the preview of a pasted link: thumbnail, title, channel, duration and date](docs/screenshots/preview.png)
+
 ## Features
 
 - **Video (MP4)** in qualities from "Best available" down to 360p
@@ -16,6 +18,10 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 - **New yt-dlp version notice** when the app opens, with one-click update
 - Light, dark or system theme (⚙ menu); settings are remembered between sessions
 - Shortcuts: **Ctrl+Enter** downloads, **Esc** cancels
+
+![Downloading a 30-second clip as MP3: audio mode, clip from 0:30 to 1:00, and the finished download in the log](docs/screenshots/audio-clip.png)
+
+<sub>Screenshots show [Big Buck Bunny](https://video.blender.org/w/dmhvQNzwBnrWy1iYzVv5g7) (c) Blender Foundation, licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).</sub>
 
 ## Installation
 
@@ -132,6 +138,7 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
 | `.github/workflows/upstream.yml` | Weekly check against the latest yt-dlp and FFmpeg |
 | `.github/dependabot.yml` | Weekly dependency and GitHub Actions update PRs |
+| `docs/screenshots/` | Screenshots used in this README |
 | `.github/ISSUE_TEMPLATE/` | Bug report and feature request forms |
 
 ### Pull requests and CI
