@@ -142,36 +142,24 @@ Dependabot opens weekly PRs for dependency and GitHub Actions updates; merge the
 
 ### Releasing a version
 
-Releases are automated with GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)). When a `vX.Y.Z` tag is pushed, the workflow:
+Releasing is just merging a pull request that bumps the version. On every push to `main`, the release workflow ([.github/workflows/release.yml](.github/workflows/release.yml)) reads the `version` in `Cargo.toml`. If there is no `vX.Y.Z` tag for it yet, it:
 
-1. checks that the tag matches the `version` in `Cargo.toml` and stops before publishing if it doesn't;
-2. runs the tests;
-3. builds the installer;
-4. publishes a GitHub **Release** with the installer, a `SHA256SUMS.txt` file and a changelog of the commits since the previous tag.
+1. runs the tests;
+2. builds the installer;
+3. publishes a GitHub **Release**, which creates the `vX.Y.Z` tag on the merge commit, with the installer, a `SHA256SUMS.txt` file and a changelog of the commits since the previous tag.
 
-To release, for example, version 0.8.0:
+If the version already has a tag, nothing happens. To release, for example, version 0.9.0:
 
-1. Set `version = "0.8.0"` in `Cargo.toml` and run `cargo build --release` to update `Cargo.lock`.
-2. Commit, create the tag and push the branch and the tag separately:
+1. On a branch, set `version = "0.9.0"` in `Cargo.toml` and run `cargo build --release` to update `Cargo.lock`.
+2. Commit, push and open a pull request.
+3. Merge it once CI passes.
 
-```bash
-git tag -a v0.8.0 -m "v0.8.0"
-```
+Don't create release tags by hand: the workflow creates them. Progress shows up in the repository's **Actions** tab, and the installer under **Releases**.
 
-```bash
-git push origin main
-```
+To preview the notes for the commits since the last release:
 
 ```bash
-git push origin v0.8.0
-```
-
-Progress shows up in the repository's **Actions** tab, and the installer under **Releases**.
-
-You can preview a tag's notes locally:
-
-```bash
-powershell -ExecutionPolicy Bypass -File installer\changelog.ps1 -Tag v0.8.0
+powershell -ExecutionPolicy Bypass -File installer\changelog.ps1 -Tag HEAD
 ```
 
 ## License
