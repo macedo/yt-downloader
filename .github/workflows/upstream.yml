@@ -1,8 +1,12 @@
-# Weekly check against the latest yt-dlp and the real YouTube (see
-# src/live_tests.rs): the app's size estimate must still pick the same formats
-# as yt-dlp, and yt-dlp must still accept the app's download arguments.
-# YouTube and yt-dlp change without notice; when a scheduled run fails, an
-# issue is opened (or updated) so the breakage doesn't go unnoticed.
+# Weekly check against the latest yt-dlp and FFmpeg (the `tools_*` tests in
+# src/live_tests.rs): yt-dlp must still accept the app's download arguments
+# and produce the expected files, using a short video generated locally.
+#
+# The checks that need the real YouTube (`live_*`) don't run here: YouTube
+# asks CI runners to prove they aren't bots. Run them by hand when needed.
+#
+# When a scheduled or manual run fails, an issue is opened (or updated) so the
+# breakage doesn't go unnoticed.
 name: Upstream check
 
 on:
@@ -13,14 +17,15 @@ on:
     paths:
       - .github/workflows/upstream.yml
       - src/live_tests.rs
+      - src/args.rs
 
 permissions:
   contents: read
   issues: write
 
 jobs:
-  live:
-    name: Live yt-dlp and YouTube checks
+  tools:
+    name: Latest yt-dlp and FFmpeg
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -28,11 +33,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-
-      # YouTube requires a JavaScript runtime for yt-dlp.
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
 
       - name: Install the latest yt-dlp and FFmpeg
         shell: pwsh
@@ -49,11 +49,10 @@ jobs:
         shell: pwsh
         run: |
           yt-dlp --version
-          deno --version
           ffmpeg -version | Select-Object -First 1
 
-      - name: Live tests
-        run: cargo test --release --locked live_ -- --ignored --nocapture
+      - name: Tool tests
+        run: cargo test --release --locked tools_ -- --ignored --nocapture
 
       - name: Open or update an issue
         if: failure() && github.event_name != 'pull_request'
@@ -64,9 +63,9 @@ jobs:
         run: |
           gh label create upstream-check --color B60205 --description "Weekly yt-dlp/YouTube check failed" --force
           $existing = gh issue list --label upstream-check --state open --json number --jq '.[0].number'
-          $body = "The weekly check against the latest yt-dlp and YouTube failed: $env:RUN_URL`n`nyt-dlp or YouTube may have changed in a way that affects the app (size estimate or download arguments). See the test output in the run."
+          $body = "The weekly check against the latest yt-dlp and FFmpeg failed: $env:RUN_URL`n`nyt-dlp may have changed in a way that affects the app's download arguments. See the test output in the run."
           if ($existing) {
               gh issue comment $existing --body $body
           } else {
-              gh issue create --title "Upstream check failed (yt-dlp / YouTube changed?)" --label upstream-check --body $body
+              gh issue create --title "Upstream check failed (yt-dlp changed?)" --label upstream-check --body $body
           }

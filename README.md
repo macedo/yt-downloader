@@ -112,13 +112,13 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `src/update.rs` | Checks GitHub for a newer yt-dlp version |
 | `src/clip.rs` | Parses clip times (`1:30`) and formats them for file names |
 | `src/net.rs` | Shared HTTP client |
-| `src/live_tests.rs` | Live checks against the real yt-dlp and YouTube (ignored by default) |
+| `src/live_tests.rs` | Checks against the real yt-dlp, FFmpeg and YouTube (ignored by default) |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
 | `.github/workflows/ci.yml` | Checks every pull request and push to `main` |
 | `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
-| `.github/workflows/upstream.yml` | Weekly live check against the latest yt-dlp and YouTube |
+| `.github/workflows/upstream.yml` | Weekly check against the latest yt-dlp and FFmpeg |
 | `.github/dependabot.yml` | Weekly dependency and GitHub Actions update PRs |
 
 ### Pull requests and CI
@@ -142,16 +142,20 @@ cargo clippy --all-targets --locked -- -D warnings
 
 Dependabot opens weekly PRs for dependency and GitHub Actions updates; merge them once CI passes.
 
-### Upstream check
+### Upstream checks
 
-YouTube and yt-dlp change without notice. Every Monday, `.github/workflows/upstream.yml` runs the live tests in `src/live_tests.rs` with the latest yt-dlp:
+yt-dlp changes without notice. Every Monday, `.github/workflows/upstream.yml` runs the `tools_*` tests in `src/live_tests.rs` with the latest yt-dlp and FFmpeg. It also runs on PRs that touch `src/args.rs`. The tests use a short video generated locally, not YouTube:
 
-- the size estimate in the link preview must pick the same formats yt-dlp picks, for a few long-lived videos and every quality;
-- yt-dlp must accept the app's download arguments (checked with `--simulate`, nothing is downloaded).
+- yt-dlp must accept the app's download arguments (`--simulate`, for every audio format, clips, chapters and playlists);
+- real downloads must produce the expected files (`.mp4`, `.mp3`, `.m4a`, `.wav`).
 
-If the scheduled run fails, it opens an issue labeled `upstream-check` (or comments on the open one). It can also be started by hand from the **Actions** tab. If YouTube asks the runner to confirm it is not a bot, the affected checks are skipped with a warning instead of failing.
+If the scheduled run fails, it opens an issue labeled `upstream-check`, or comments on the open one. It can also be started by hand from the **Actions** tab.
 
-To run the live tests locally (needs yt-dlp, Deno and FFmpeg):
+The `live_*` test checks that the link preview's size estimate picks the same formats as yt-dlp on real YouTube videos. It can't run on GitHub, because YouTube asks CI runners to prove they aren't bots, so run it by hand when needed, for example before a release. It needs yt-dlp, Deno and FFmpeg.
+
+```bash
+cargo test --release -- --ignored tools_
+```
 
 ```bash
 cargo test --release -- --ignored live_
