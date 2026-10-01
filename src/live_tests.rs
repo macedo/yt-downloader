@@ -152,6 +152,15 @@ fn tools_ytdlp_accepts_download_args() {
             },
             None,
         ),
+        (
+            "video, description and SponsorBlock".into(),
+            Settings {
+                write_description: true,
+                sponsorblock: true,
+                ..settings(Mode::Video, &out)
+            },
+            None,
+        ),
     ];
     for (i, (label, _)) in AUDIO_FORMATS.iter().enumerate() {
         let s = Settings {
@@ -182,17 +191,25 @@ fn tools_ytdlp_accepts_download_args() {
 fn tools_downloads_produce_the_expected_files() {
     // Clips can't be tested here: yt-dlp only cuts streams downloaded over
     // the network, not local files.
-    let cases = [
-        ("video", Mode::Video, "mp4", "sample.mp4"),
-        ("audio, MP3", Mode::Audio, "mp3", "sample.mp3"),
-        ("audio, M4A", Mode::Audio, "m4a", "sample.m4a"),
-        ("audio, WAV", Mode::Audio, "wav", "sample.wav"),
+    let cases: [(&str, Mode, &str, bool, &[&str]); 5] = [
+        ("video", Mode::Video, "mp4", false, &["sample.mp4"]),
+        ("audio, MP3", Mode::Audio, "mp3", false, &["sample.mp3"]),
+        ("audio, M4A", Mode::Audio, "m4a", false, &["sample.m4a"]),
+        ("audio, WAV", Mode::Audio, "wav", false, &["sample.wav"]),
+        (
+            "audio, MP3 with description",
+            Mode::Audio,
+            "mp3",
+            true,
+            &["sample - description.txt", "sample.mp3"],
+        ),
     ];
     let mut failures = Vec::new();
-    for (label, mode, ext, expected) in cases {
+    for (i, (label, mode, ext, description, expected)) in cases.into_iter().enumerate() {
         // A folder per case: audio extraction deletes the intermediate .mp4.
-        let out = temp_dir(&format!("download-{ext}"));
+        let out = temp_dir(&format!("download-{i}-{ext}"));
         let mut s = settings(mode, &out);
+        s.write_description = description;
         if mode == Mode::Audio {
             s.audio_format = audio_format(ext);
         }
@@ -205,8 +222,8 @@ fn tools_downloads_produce_the_expected_files() {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         files.sort();
-        if files != [expected] {
-            failures.push(format!("[{label}] expected only {expected}, got {files:?}"));
+        if files != expected {
+            failures.push(format!("[{label}] expected {expected:?}, got {files:?}"));
         }
     }
     assert!(

@@ -66,6 +66,10 @@ pub struct Settings {
     pub playlist: bool,
     pub embed_thumbnail: bool,
     pub split_chapters: bool,
+    /// Save the video's description as a .txt next to the download.
+    pub write_description: bool,
+    /// Cut sponsor segments listed in SponsorBlock (whole videos only).
+    pub sponsorblock: bool,
     pub theme: ThemeChoice,
 }
 
@@ -83,6 +87,8 @@ impl Default for Settings {
             playlist: false,
             embed_thumbnail: true,
             split_chapters: false,
+            write_description: false,
+            sponsorblock: false,
             theme: ThemeChoice::System,
         }
     }

@@ -827,6 +827,31 @@ impl App {
                  in a folder named after the video. Videos without chapters are unaffected.",
             )
             .on_disabled_hover_text("Unavailable when downloading a clip or picked chapters");
+            ui.checkbox(
+                &mut self.settings.write_description,
+                "Save description (.txt)",
+            )
+            .on_hover_text(
+                "Saves the video's description next to the download. Lessons often \
+                     link tabs, chords and the tuning there.",
+            );
+            let whole = self.part() == Part::Whole;
+            ui.add_enabled(
+                whole,
+                egui::Checkbox::new(
+                    &mut self.settings.sponsorblock,
+                    "Skip sponsors (SponsorBlock)",
+                ),
+            )
+            .on_hover_text(
+                "Removes sponsor segments, self-promotion, \"like and subscribe\" reminders \
+                 and non-music parts of music videos, where the SponsorBlock community has \
+                 marked them. Whole videos only.",
+            )
+            .on_disabled_hover_text(
+                "Not applied to clips or picked chapters: SponsorBlock's times are for the \
+                 whole video.",
+            );
 
             ui.add_space(16.0);
             section(ui, "✂  Clip");

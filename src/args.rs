@@ -3,6 +3,12 @@
 use crate::clip::format_time;
 use crate::settings::{AUDIO_FORMATS, AUDIO_QUALITIES, Mode, Settings, VIDEO_QUALITIES};
 
+/// SponsorBlock categories removed by the "Skip sponsors" option: paid
+/// sponsors, self-promotion, "like and subscribe" reminders, and non-music
+/// parts of music videos (handy for backing tracks). Intros and outros are
+/// kept: in a lesson they may matter.
+pub const SPONSORBLOCK_CATEGORIES: &str = "sponsor,selfpromo,interaction,music_offtopic";
+
 /// Which part of each video to download.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Part {
@@ -118,6 +124,25 @@ pub fn download_args(s: &Settings, part: &Part, urls: &[String]) -> Vec<String> 
             ]);
         }
         Part::Whole => {}
+    }
+
+    if s.write_description {
+        // A .txt next to the download. (--write-description would save a
+        // ".description" file, which Windows doesn't know how to open.)
+        a.extend([
+            "--print-to-file".into(),
+            "%(description|)s".into(),
+            "%(title)s - description.txt".into(),
+        ]);
+    }
+
+    // SponsorBlock's segment times are for the whole video: applied to a clip
+    // or a chapter they miss, or cut the wrong part. Whole downloads only.
+    if s.sponsorblock && *part == Part::Whole {
+        a.extend([
+            "--sponsorblock-remove".into(),
+            SPONSORBLOCK_CATEGORIES.into(),
+        ]);
     }
 
     a.push("--".into());
@@ -391,5 +416,46 @@ mod tests {
             values_after(&args, "-o"),
             ["%(title)s - %(section_number+1)02d - %(section_title)s.%(ext)s"]
         );
+    }
+    #[test]
+    fn description_is_saved_as_a_txt_file() {
+        let mut s = settings(Mode::Audio);
+        let args = download_args(&s, &Part::Whole, &urls(&["https://a"]));
+        assert!(!has(&args, "--print-to-file"));
+
+        s.write_description = true;
+        let args = download_args(&s, &Part::Whole, &urls(&["https://a"]));
+        let at = args.iter().position(|a| a == "--print-to-file").unwrap();
+        assert_eq!(
+            &args[at + 1..at + 3],
+            ["%(description|)s", "%(title)s - description.txt"]
+        );
+    }
+
+    #[test]
+    fn sponsorblock_only_applies_to_whole_downloads() {
+        let mut s = settings(Mode::Video);
+        let args = download_args(&s, &Part::Whole, &urls(&["https://a"]));
+        assert!(!has(&args, "--sponsorblock-remove"));
+
+        s.sponsorblock = true;
+        let args = download_args(&s, &Part::Whole, &urls(&["https://a"]));
+        assert_eq!(
+            values_after(&args, "--sponsorblock-remove"),
+            ["sponsor,selfpromo,interaction,music_offtopic"]
+        );
+
+        // Segment times are for the whole video, so they'd cut the wrong part
+        // of a clip or chapter.
+        for part in [
+            Part::Clip {
+                start: 10,
+                end: Some(20),
+            },
+            Part::Chapters(vec!["Solo".into()]),
+        ] {
+            let args = download_args(&s, &part, &urls(&["https://a"]));
+            assert!(!has(&args, "--sponsorblock-remove"), "{part:?}");
+        }
     }
 }

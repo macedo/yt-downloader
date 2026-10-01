@@ -16,6 +16,8 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 - **Pick chapters**: the preview lists a video's chapters; tick the ones you want to download only those (one file each, named after the chapter), or use one as the clip
 - **Download only a clip**, e.g. from `1:30` to `2:45`
 - **Cover art and metadata** embedded in the file
+- **Save the description** as a `.txt` next to the download (lessons often link tabs, chords and the tuning there)
+- **Skip sponsors** with [SponsorBlock](https://sponsor.ajay.app/): removes sponsor segments, self-promotion, "like and subscribe" reminders and non-music parts of music videos, where the community has marked them (whole videos only)
 - **New yt-dlp version notice** when the app opens, with one-click update
 - Light, dark or system theme (⚙ menu); settings are remembered between sessions
 - Shortcuts: **Ctrl+Enter** downloads, **Esc** cancels
