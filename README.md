@@ -112,11 +112,13 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `src/update.rs` | Checks GitHub for a newer yt-dlp version |
 | `src/clip.rs` | Parses clip times (`1:30`) and formats them for file names |
 | `src/net.rs` | Shared HTTP client |
+| `src/live_tests.rs` | Live checks against the real yt-dlp and YouTube (ignored by default) |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
 | `.github/workflows/ci.yml` | Checks every pull request and push to `main` |
 | `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
+| `.github/workflows/upstream.yml` | Weekly live check against the latest yt-dlp and YouTube |
 | `.github/dependabot.yml` | Weekly dependency and GitHub Actions update PRs |
 
 ### Pull requests and CI
@@ -139,6 +141,21 @@ cargo clippy --all-targets --locked -- -D warnings
 ```
 
 Dependabot opens weekly PRs for dependency and GitHub Actions updates; merge them once CI passes.
+
+### Upstream check
+
+YouTube and yt-dlp change without notice. Every Monday, `.github/workflows/upstream.yml` runs the live tests in `src/live_tests.rs` with the latest yt-dlp:
+
+- the size estimate in the link preview must pick the same formats yt-dlp picks, for a few long-lived videos and every quality;
+- yt-dlp must accept the app's download arguments (checked with `--simulate`, nothing is downloaded).
+
+If the scheduled run fails, it opens an issue labeled `upstream-check` (or comments on the open one). It can also be started by hand from the **Actions** tab. If YouTube asks the runner to confirm it is not a bot, the affected checks are skipped with a warning instead of failing.
+
+To run the live tests locally (needs yt-dlp, Deno and FFmpeg):
+
+```bash
+cargo test --release -- --ignored live_
+```
 
 ### Releasing a version
 

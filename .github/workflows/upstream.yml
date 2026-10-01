@@ -1,0 +1,72 @@
+# Weekly check against the latest yt-dlp and the real YouTube (see
+# src/live_tests.rs): the app's size estimate must still pick the same formats
+# as yt-dlp, and yt-dlp must still accept the app's download arguments.
+# YouTube and yt-dlp change without notice; when a scheduled run fails, an
+# issue is opened (or updated) so the breakage doesn't go unnoticed.
+name: Upstream check
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays, 09:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/upstream.yml
+      - src/live_tests.rs
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  live:
+    name: Live yt-dlp and YouTube checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # YouTube requires a JavaScript runtime for yt-dlp.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install the latest yt-dlp and FFmpeg
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:RUNNER_TEMP 'bin'
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile (Join-Path $bin 'yt-dlp.exe')
+          Add-Content $env:GITHUB_PATH $bin
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+              choco install ffmpeg -y --no-progress
+          }
+
+      - name: Tool versions
+        shell: pwsh
+        run: |
+          yt-dlp --version
+          deno --version
+          ffmpeg -version | Select-Object -First 1
+
+      - name: Live tests
+        run: cargo test --release --locked live_ -- --ignored --nocapture
+
+      - name: Open or update an issue
+        if: failure() && github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create upstream-check --color B60205 --description "Weekly yt-dlp/YouTube check failed" --force
+          $existing = gh issue list --label upstream-check --state open --json number --jq '.[0].number'
+          $body = "The weekly check against the latest yt-dlp and YouTube failed: $env:RUN_URL`n`nyt-dlp or YouTube may have changed in a way that affects the app (size estimate or download arguments). See the test output in the run."
+          if ($existing) {
+              gh issue comment $existing --body $body
+          } else {
+              gh issue create --title "Upstream check failed (yt-dlp / YouTube changed?)" --label upstream-check --body $body
+          }

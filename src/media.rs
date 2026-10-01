@@ -72,7 +72,7 @@ impl FormatInfo {
     }
 }
 
-fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
+pub fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
     let str_field = |key: &str| {
         v.get(key)
             .and_then(|x| x.as_str())
