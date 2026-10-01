@@ -97,3 +97,221 @@ pub fn download_args(
     a.extend(urls.iter().cloned());
     a
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::download_args;
+    use crate::settings::{AUDIO_FORMATS, AUDIO_QUALITIES, Mode, Settings, VIDEO_QUALITIES};
+
+    fn settings(mode: Mode) -> Settings {
+        Settings {
+            mode,
+            out_dir: PathBuf::from(r"C:\out"),
+            ..Settings::default()
+        }
+    }
+
+    fn urls(list: &[&str]) -> Vec<String> {
+        list.iter().map(|u| u.to_string()).collect()
+    }
+
+    /// Every value that follows `flag` in `args`.
+    fn values_after<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+        args.windows(2)
+            .filter(|w| w[0] == flag)
+            .map(|w| w[1].as_str())
+            .collect()
+    }
+
+    fn has(args: &[String], flag: &str) -> bool {
+        args.iter().any(|a| a == flag)
+    }
+
+    fn audio_format_index(ext: &str) -> usize {
+        AUDIO_FORMATS.iter().position(|f| f.1 == ext).unwrap()
+    }
+
+    #[test]
+    fn default_video_download_full_args() {
+        let args = download_args(
+            &settings(Mode::Video),
+            None,
+            &urls(&["https://a", "https://b"]),
+        );
+        assert_eq!(
+            args,
+            [
+                "--newline",
+                "--no-colors",
+                "--no-mtime",
+                "--progress-template",
+                "download:[PROG]%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+                "-P",
+                r"C:\out",
+                "-o",
+                "%(title)s.%(ext)s",
+                "--no-playlist",
+                "--embed-metadata",
+                "-f",
+                "bv*+ba/b",
+                "-S",
+                "res,ext:mp4:m4a",
+                "--merge-output-format",
+                "mp4",
+                "--embed-thumbnail",
+                "--",
+                "https://a",
+                "https://b",
+            ]
+        );
+    }
+
+    #[test]
+    fn video_quality_limits_the_resolution() {
+        for (i, (label, height)) in VIDEO_QUALITIES.iter().enumerate() {
+            let mut s = settings(Mode::Video);
+            s.video_quality = i;
+            let expected = match height {
+                Some(h) => format!("res:{h},ext:mp4:m4a"),
+                None => "res,ext:mp4:m4a".to_owned(),
+            };
+            let args = download_args(&s, None, &urls(&["https://a"]));
+            assert_eq!(values_after(&args, "-S"), [expected.as_str()], "{label}");
+        }
+    }
+
+    #[test]
+    fn audio_download_extracts_with_format_and_quality() {
+        for (fi, (_, ext)) in AUDIO_FORMATS.iter().enumerate() {
+            for (qi, (_, quality)) in AUDIO_QUALITIES.iter().enumerate() {
+                let mut s = settings(Mode::Audio);
+                s.audio_format = fi;
+                s.audio_quality = qi;
+                let args = download_args(&s, None, &urls(&["https://a"]));
+                assert_eq!(values_after(&args, "-f"), ["ba/b"]);
+                assert!(has(&args, "-x"));
+                assert_eq!(values_after(&args, "--audio-format"), [*ext]);
+                assert_eq!(values_after(&args, "--audio-quality"), [*quality]);
+                // Video-only options must not leak into audio downloads.
+                assert!(!has(&args, "-S"));
+                assert!(!has(&args, "--merge-output-format"));
+            }
+        }
+    }
+
+    #[test]
+    fn audio_cover_art_is_converted_to_jpg_except_for_wav() {
+        let mut s = settings(Mode::Audio);
+        s.audio_format = audio_format_index("mp3");
+        let args = download_args(&s, None, &urls(&["https://a"]));
+        assert!(has(&args, "--embed-thumbnail"));
+        assert_eq!(values_after(&args, "--convert-thumbnails"), ["jpg"]);
+
+        s.audio_format = audio_format_index("wav");
+        let args = download_args(&s, None, &urls(&["https://a"]));
+        assert!(!has(&args, "--embed-thumbnail"));
+        assert!(!has(&args, "--convert-thumbnails"));
+    }
+
+    #[test]
+    fn cover_art_can_be_turned_off() {
+        for mode in [Mode::Video, Mode::Audio] {
+            let mut s = settings(mode);
+            s.embed_thumbnail = false;
+            let args = download_args(&s, None, &urls(&["https://a"]));
+            assert!(!has(&args, "--embed-thumbnail"));
+            assert!(!has(&args, "--convert-thumbnails"));
+        }
+    }
+
+    #[test]
+    fn playlist_option() {
+        let mut s = settings(Mode::Video);
+        let args = download_args(&s, None, &urls(&["https://a"]));
+        assert!(has(&args, "--no-playlist") && !has(&args, "--yes-playlist"));
+
+        s.playlist = true;
+        let args = download_args(&s, None, &urls(&["https://a"]));
+        assert!(has(&args, "--yes-playlist") && !has(&args, "--no-playlist"));
+    }
+
+    #[test]
+    fn clip_with_start_and_end() {
+        let args = download_args(
+            &settings(Mode::Audio),
+            Some((90, Some(165))),
+            &urls(&["https://a"]),
+        );
+        assert_eq!(
+            values_after(&args, "-o"),
+            ["%(title)s (clip 1m30s-2m45s).%(ext)s"]
+        );
+        assert_eq!(values_after(&args, "--download-sections"), ["*90-165"]);
+        assert!(has(&args, "--force-keyframes-at-cuts"));
+    }
+
+    #[test]
+    fn clip_without_end_runs_to_the_end() {
+        let args = download_args(
+            &settings(Mode::Video),
+            Some((30, None)),
+            &urls(&["https://a"]),
+        );
+        assert_eq!(
+            values_after(&args, "-o"),
+            ["%(title)s (clip 30s-end).%(ext)s"]
+        );
+        assert_eq!(values_after(&args, "--download-sections"), ["*30-inf"]);
+    }
+
+    #[test]
+    fn split_chapters_adds_a_chapter_output_template() {
+        let mut s = settings(Mode::Audio);
+        s.split_chapters = true;
+        let args = download_args(&s, None, &urls(&["https://a"]));
+        assert!(has(&args, "--split-chapters"));
+        assert_eq!(
+            values_after(&args, "-o"),
+            [
+                "%(title)s.%(ext)s",
+                "chapter:%(title)s/%(section_number)02d - %(section_title)s.%(ext)s",
+            ]
+        );
+    }
+
+    #[test]
+    fn clip_takes_precedence_over_split_chapters() {
+        let mut s = settings(Mode::Video);
+        s.split_chapters = true;
+        let args = download_args(&s, Some((10, Some(20))), &urls(&["https://a"]));
+        assert!(has(&args, "--download-sections"));
+        assert!(!has(&args, "--split-chapters"));
+    }
+
+    #[test]
+    fn urls_always_come_after_the_option_separator() {
+        // A "link" that looks like an option must never be read as one.
+        let list = urls(&["https://a", "-x", "--exec=calc"]);
+        for mode in [Mode::Video, Mode::Audio] {
+            let args = download_args(&settings(mode), Some((1, None)), &list);
+            let sep = args.iter().position(|a| a == "--").expect("-- separator");
+            assert_eq!(&args[sep + 1..], list.as_slice());
+            assert_eq!(args.iter().filter(|a| *a == "--").count(), 1);
+        }
+    }
+
+    #[test]
+    fn progress_template_matches_what_the_app_parses() {
+        // process.rs reads lines starting with "[PROG]" and splits on '|'
+        // into percent, speed and ETA.
+        let args = download_args(&settings(Mode::Video), None, &urls(&["https://a"]));
+        let template = values_after(&args, "--progress-template")[0];
+        let line = template
+            .strip_prefix("download:")
+            .expect("download: prefix");
+        assert!(line.starts_with("[PROG]"));
+        assert_eq!(line.matches('|').count(), 2);
+    }
+}
