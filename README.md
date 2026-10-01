@@ -107,7 +107,30 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
 | `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
+| `.github/workflows/ci.yml` | Checks every pull request and push to `main` |
 | `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
+| `.github/dependabot.yml` | Weekly dependency and GitHub Actions update PRs |
+
+### Pull requests and CI
+
+Changes go through pull requests. Every PR (and every push to `main`) runs:
+
+- `cargo fmt --all --check` — formatting
+- `cargo clippy --all-targets --locked -- -D warnings` — lints, with warnings treated as errors
+- `cargo test --locked` and a release build
+- [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) — security advisories, banned crates and allowed sources
+
+Run the same checks locally before pushing:
+
+```bash
+cargo fmt --all
+```
+
+```bash
+cargo clippy --all-targets --locked -- -D warnings
+```
+
+Dependabot opens weekly PRs for dependency and GitHub Actions updates; merge them once CI passes.
 
 ### Releasing a version
 
