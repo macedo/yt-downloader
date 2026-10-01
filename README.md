@@ -14,7 +14,7 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 - **Download only a clip**, e.g. from `1:30` to `2:45`
 - **Cover art and metadata** embedded in the file
 - **New yt-dlp version notice** when the app opens, with one-click update
-- Light, dark or system theme; settings are remembered between sessions
+- Light, dark or system theme (⚙ menu); settings are remembered between sessions
 - Shortcuts: **Ctrl+Enter** downloads, **Esc** cancels
 
 ## Installation
@@ -46,6 +46,10 @@ If yt-dlp is not installed, the app shows an **Install yt-dlp** button in the to
 4. Click **Download** or press Ctrl+Enter.
 
 Files are saved to the **Destination** folder, which defaults to your Downloads folder. Settings are stored in `%APPDATA%\yt-downloader\config.json`.
+
+### Reporting a problem
+
+The app writes a log to `%APPDATA%\yt-downloader\logs\yt-downloader.log`: start-up, yt-dlp versions, the commands it runs, errors and crashes. To report a problem, open the **⚙** menu and choose **Report a problem…**, which opens the bug report form on GitHub. The form asks for the app version (in the window title), the yt-dlp version (bottom right of the window) and the end of the log (**⚙ → Open log folder**).
 
 ### Notes
 
@@ -112,6 +116,7 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `src/update.rs` | Checks GitHub for a newer yt-dlp version |
 | `src/clip.rs` | Parses clip times (`1:30`) and formats them for file names |
 | `src/net.rs` | Shared HTTP client |
+| `src/logging.rs` | Log file in `%APPDATA%`, including crashes |
 | `src/live_tests.rs` | Checks against the real yt-dlp, FFmpeg and YouTube (ignored by default) |
 | `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
 | `installer/build.ps1` | Builds the app and the installer |
@@ -120,6 +125,7 @@ The script builds the app in release mode and creates `dist\YT-Downloader-Setup-
 | `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
 | `.github/workflows/upstream.yml` | Weekly check against the latest yt-dlp and FFmpeg |
 | `.github/dependabot.yml` | Weekly dependency and GitHub Actions update PRs |
+| `.github/ISSUE_TEMPLATE/` | Bug report and feature request forms |
 
 ### Pull requests and CI
 

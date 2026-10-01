@@ -1,0 +1,56 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The details below make it much faster to find the cause.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link
+      description: The link you were downloading, if the problem is with a specific one.
+      placeholder: https://www.youtube.com/watch?v=...
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Video
+        - Audio
+        - Not related to a download
+  - type: input
+    id: app-version
+    attributes:
+      label: YT Downloader version
+      description: Shown in the window title and at the bottom of the ⚙ menu.
+      placeholder: "0.8.0"
+    validations:
+      required: true
+  - type: input
+    id: ytdlp-version
+    attributes:
+      label: yt-dlp version
+      description: Shown at the bottom right of the window, next to the green dot.
+      placeholder: "2026.08.19"
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        ⚙ menu → **Open log folder** → paste the end of `yt-downloader.log`, and the lines from the app's Log panel if relevant.
+        The log can contain links and folder names; remove anything you don't want to share.
+      render: text

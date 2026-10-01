@@ -10,6 +10,7 @@ use eframe::egui;
 use std::os::windows::process::CommandExt;
 
 use crate::clip::parse_time;
+use crate::logging;
 use crate::media::{MediaInfo, fetch_media_info, format_count, format_duration, format_size};
 use crate::process::{CREATE_NO_WINDOW, Msg, find_ytdlp, spawn_process};
 use crate::settings::{
@@ -19,7 +20,10 @@ use crate::update::{VersionInfo, check_ytdlp_version, is_newer};
 
 const MAX_LOG_LINES: usize = 3000;
 
-#[derive(Clone, Copy, PartialEq)]
+/// Opens GitHub's "new issue" page, which offers the bug report template.
+const REPORT_ISSUE_URL: &str = "https://github.com/macedo/yt-downloader/issues/new/choose";
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum JobKind {
     Download,
     Tooling,
@@ -100,6 +104,10 @@ impl App {
         let settings = Settings::load();
         settings.theme.apply(&cc.egui_ctx);
         let ytdlp = find_ytdlp();
+        logging::write(&match &ytdlp {
+            Some(p) => format!("yt-dlp found at {}", p.display()),
+            None => "yt-dlp not found".to_owned(),
+        });
         let status = match &ytdlp {
             Some(_) => "Ready.".to_owned(),
             None => "yt-dlp not found — click \"Install yt-dlp\".".to_owned(),
@@ -160,7 +168,10 @@ impl App {
                     key,
                     info: Box::new(info),
                 },
-                Ok(Err(error)) => Preview::Failed { key, error },
+                Ok(Err(error)) => {
+                    logging::write(&format!("Preview of {} failed: {error}", key.0));
+                    Preview::Failed { key, error }
+                }
                 Err(mpsc::TryRecvError::Disconnected) => Preview::Failed {
                     key,
                     error: "the lookup was interrupted".to_owned(),
@@ -291,6 +302,11 @@ impl App {
         let Some(rx) = &self.version_rx else { return };
         match rx.try_recv() {
             Ok(info) => {
+                logging::write(&format!(
+                    "yt-dlp version: installed {}, latest {}",
+                    info.installed.as_deref().unwrap_or("unknown"),
+                    info.latest.as_deref().unwrap_or("unknown (offline?)"),
+                ));
                 self.update_available = match (info.latest, &info.installed) {
                     (Some(latest), Some(installed)) if is_newer(&latest, installed) => Some(latest),
                     _ => None,
@@ -306,6 +322,10 @@ impl App {
     fn push_log(&mut self, line: impl Into<String>) {
         let line = line.into();
         let is_error = line.starts_with("ERROR");
+        // Commands and errors also go to the log file; progress lines don't.
+        if is_error || line.starts_with("> ") {
+            logging::write(&line);
+        }
         self.log.push((line, is_error));
         if self.log.len() > MAX_LOG_LINES {
             let excess = self.log.len() - MAX_LOG_LINES;
@@ -462,6 +482,7 @@ impl App {
                             code.map_or("?".to_owned(), |c| c.to_string())
                         )
                     };
+                    logging::write(&format!("{:?} finished: {}", job.kind, self.status));
                     if job.kind == JobKind::Tooling {
                         self.ytdlp = find_ytdlp();
                         if let Some(p) = &self.ytdlp {
@@ -553,7 +574,8 @@ impl App {
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button("🌓", |ui| {
+                ui.menu_button("⚙", |ui| {
+                    ui.label(egui::RichText::new("Theme").weak());
                     for (choice, label) in [
                         (ThemeChoice::System, "Follow system"),
                         (ThemeChoice::Light, "Light"),
@@ -567,9 +589,24 @@ impl App {
                             ui.close();
                         }
                     }
+                    ui.separator();
+                    if ui.button("Open log folder").clicked() {
+                        if let Some(dir) = logging::log_dir() {
+                            let _ = Command::new("explorer").arg(dir).spawn();
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Report a problem…").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(REPORT_ISSUE_URL));
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"))).weak(),
+                    );
                 })
                 .response
-                .on_hover_text("Theme");
+                .on_hover_text("Settings and help");
 
                 // Updates are offered by the notice banner; this only handles installing.
                 if self.ytdlp.is_none()
