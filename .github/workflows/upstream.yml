@@ -3,8 +3,7 @@
 # and produce the expected files, using a short video generated locally.
 #
 # The checks that need the real YouTube (`live_*`) don't run here: YouTube
-# asks CI runners to prove they aren't bots. They run weekly on the
-# maintainer's PC instead (tools/live-check.ps1).
+# asks CI runners to prove they aren't bots. Run them by hand when needed.
 #
 # When a scheduled or manual run fails, an issue is opened (or updated) so the
 # breakage doesn't go unnoticed.

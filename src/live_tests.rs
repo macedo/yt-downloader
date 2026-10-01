@@ -11,8 +11,8 @@
 //!   ```
 //!
 //! - `live_*`: the real YouTube. YouTube asks datacenter IPs (such as CI
-//!   runners) to prove they aren't bots, so these run weekly on the
-//!   maintainer's PC instead (`tools/live-check.ps1`):
+//!   runners) to prove they aren't bots, so these don't run automatically;
+//!   run them by hand when needed, e.g. before a release:
 //!
 //!   ```text
 //!   cargo test --release -- --ignored live_
