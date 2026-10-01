@@ -126,7 +126,7 @@ Changes go through pull requests. Every PR (and every push to `main`) runs:
 - `cargo fmt --all --check` — formatting
 - `cargo clippy --all-targets --locked -- -D warnings` — lints, with warnings treated as errors
 - `cargo test --locked` and a release build
-- [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) — security advisories, banned crates and allowed sources
+- [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) — security advisories, dependency licenses, banned crates and allowed sources (configured in `deny.toml`)
 
 Run the same checks locally before pushing:
 
@@ -173,3 +173,9 @@ You can preview a tag's notes locally:
 ```bash
 powershell -ExecutionPolicy Bypass -File installer\changelog.ps1 -Tag v0.8.0
 ```
+
+## License
+
+[MIT](LICENSE) © macedo. If you find it useful and we ever meet, a beer is always welcome. 🍺
+
+YT Downloader is a front end: it doesn't bundle yt-dlp, FFmpeg or Deno, which are installed separately and have their own licenses. You are responsible for respecting the terms of the sites you download from and the rights of the content's owners.

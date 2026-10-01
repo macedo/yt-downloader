@@ -46,8 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Security advisories (RustSec), banned crates and allowed sources.
-      # Licenses are not checked yet: the project has no license of its own.
+      # Security advisories (RustSec), dependency licenses, banned crates and
+      # allowed sources (see deny.toml).
       - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories bans sources
