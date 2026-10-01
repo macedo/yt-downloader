@@ -22,6 +22,7 @@ const MAX_LOG_LINES: usize = 3000;
 
 /// Opens GitHub's "new issue" page, which offers the bug report template.
 const REPORT_ISSUE_URL: &str = "https://github.com/macedo/yt-downloader/issues/new/choose";
+const REPO_URL: &str = "https://github.com/macedo/yt-downloader";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum JobKind {
@@ -95,6 +96,7 @@ pub struct App {
     cut_start: String,
     cut_end: String,
     preview: Preview,
+    show_about: bool,
 }
 
 impl App {
@@ -131,6 +133,7 @@ impl App {
             cut_start: String::new(),
             cut_end: String::new(),
             preview: Preview::None,
+            show_about: false,
         };
         app.start_version_check();
         app
@@ -600,6 +603,10 @@ impl App {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(REPORT_ISSUE_URL));
                         ui.close();
                     }
+                    if ui.button("About YT Downloader…").clicked() {
+                        self.show_about = true;
+                        ui.close();
+                    }
                     ui.separator();
                     ui.label(
                         egui::RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"))).weak(),
@@ -844,6 +851,47 @@ impl App {
         ui.add_space(2.0);
     }
 
+    fn about_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_about;
+        egui::Window::new("About YT Downloader")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.heading(concat!("YT Downloader ", env!("CARGO_PKG_VERSION")));
+                ui.label("A front end for yt-dlp to download video and audio.");
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Not affiliated with, endorsed by or sponsored by any of the sites it can download from.",
+                        )
+                        .strong(),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(4.0);
+                ui.add(
+                    egui::Label::new(
+                        "Downloading may be restricted by a site's terms of service and by \
+                         copyright law. Only download content you own, that is licensed for \
+                         it (for example Creative Commons or public domain), or that you \
+                         have permission to download. You are responsible for how you use \
+                         this app.",
+                    )
+                    .wrap(),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("MIT License  •");
+                    ui.hyperlink_to("Source code on GitHub", REPO_URL);
+                });
+            });
+        self.show_about = open;
+    }
+
     fn update_banner(&mut self, ui: &mut egui::Ui) {
         let latest = self.update_available.clone().unwrap_or_default();
         let installed = self.ytdlp_version.clone().unwrap_or_default();
@@ -912,6 +960,7 @@ impl eframe::App for App {
             .exact_size(250.0)
             .show(ui, |ui| self.options_panel(ui));
         egui::CentralPanel::default().show(ui, |ui| self.main_area(ui));
+        self.about_window(ui.ctx());
     }
 
     fn on_exit(&mut self) {
