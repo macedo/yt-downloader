@@ -66,10 +66,14 @@ winget install -e --id yt-dlp.yt-dlp
 ```
 
 ```bash
-rustup default stable-x86_64-pc-windows-gnu
+rustup set default-host x86_64-pc-windows-gnu
 ```
 
+The Rust version is pinned in `rust-toolchain.toml`; rustup installs it the first time you build in the project folder. Setting the default host to GNU makes rustup pick the GNU build of that version. CI builds the same version with the MSVC toolchain, which GitHub's runners already have.
+
 MinGW (WinLibs) must be on the `PATH` while building, because the `dlltool` bundled with rustup doesn't work on its own. winget adds MinGW to the PATH; open a new terminal after installing it.
+
+To move to a newer Rust, change `channel` in `rust-toolchain.toml` in a PR. CI then checks the new compiler and its clippy lints before a release uses it.
 
 > With **Smart App Control** turned on, Windows blocks the executables produced by `cargo`, including build scripts, and the build fails.
 

@@ -57,7 +57,8 @@ jobs:
           # Full history and tags, to build the changelog since the previous tag.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup install && rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@v2
 
