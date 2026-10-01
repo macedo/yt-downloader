@@ -1,4 +1,4 @@
-// Esconde a janela de console no build de release.
+// Hide the console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{BufRead, BufReader, Read};
@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-/// Impede que processos filhos (yt-dlp, winget, ffmpeg) abram janelas de console.
+/// Keeps child processes (yt-dlp, winget, ffmpeg) from opening console windows.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 3000;
 
 const VIDEO_QUALITIES: &[(&str, Option<u32>)] = &[
-    ("Melhor disponível", None),
+    ("Best available", None),
     ("2160p (4K)", Some(2160)),
     ("1440p", Some(1440)),
     ("1080p", Some(1080)),
@@ -31,13 +31,13 @@ const AUDIO_FORMATS: &[(&str, &str)] = &[
     ("MP3", "mp3"),
     ("M4A (AAC)", "m4a"),
     ("Opus", "opus"),
-    ("FLAC (sem perdas)", "flac"),
+    ("FLAC (lossless)", "flac"),
     ("WAV", "wav"),
-    ("Original (sem conversão)", "best"),
+    ("Original (no conversion)", "best"),
 ];
 
 const AUDIO_QUALITIES: &[(&str, &str)] = &[
-    ("Máxima (VBR 0)", "0"),
+    ("Highest (VBR 0)", "0"),
     ("320 kbps", "320K"),
     ("256 kbps", "256K"),
     ("192 kbps", "192K"),
@@ -130,7 +130,7 @@ impl Settings {
     }
 }
 
-/// Mensagens enviadas pelas threads do processo filho para a interface.
+/// Messages sent from the child-process threads to the UI.
 enum Msg {
     Line(String),
     Progress { pct: f32, speed: String, eta: String },
@@ -150,12 +150,12 @@ struct Job {
     cancelled: bool,
 }
 
-/// Link (e se playlists estão ativas) para o qual a prévia foi pedida.
+/// Link (and whether playlists are enabled) the preview was requested for.
 type PreviewKey = (String, bool);
 
 enum Preview {
     None,
-    /// Espera o usuário parar de digitar antes de consultar.
+    /// Waits for the user to stop typing before querying.
     Waiting { key: PreviewKey, since: f64 },
     Loading { key: PreviewKey, rx: Receiver<Result<MediaInfo, String>> },
     Ready { key: PreviewKey, info: Box<MediaInfo> },
@@ -189,10 +189,10 @@ struct App {
     egui_ctx: egui::Context,
     version_rx: Option<Receiver<VersionInfo>>,
     ytdlp_version: Option<String>,
-    /// Versão mais nova do yt-dlp publicada, quando for maior que a instalada.
+    /// Newest published yt-dlp version, when newer than the installed one.
     update_available: Option<String>,
     update_dismissed: bool,
-    /// Corte de trecho: vale só para o download atual, por isso não é salvo.
+    /// Clip range: applies only to the current download, so it is not saved.
     cut_enabled: bool,
     cut_start: String,
     cut_end: String,
@@ -207,8 +207,8 @@ impl App {
         settings.theme.apply(&cc.egui_ctx);
         let ytdlp = find_ytdlp();
         let status = match &ytdlp {
-            Some(_) => "Pronto.".to_owned(),
-            None => "yt-dlp não encontrado — clique em \"Instalar yt-dlp\".".to_owned(),
+            Some(_) => "Ready.".to_owned(),
+            None => "yt-dlp not found — click \"Install yt-dlp\".".to_owned(),
         };
         let mut app = Self {
             saved_settings: settings.clone(),
@@ -234,21 +234,21 @@ impl App {
         app
     }
 
-    /// Consulta, em segundo plano, a versão instalada e a última publicada.
+    /// Looks up the installed and latest published versions in the background.
     fn start_version_check(&mut self) {
         if let Some(exe) = &self.ytdlp {
             self.version_rx = Some(check_ytdlp_version(exe.clone(), self.egui_ctx.clone()));
         }
     }
 
-    /// Pede a prévia quando há exatamente um link e recolhe o resultado.
+    /// Requests the preview when there is exactly one link and collects the result.
     fn update_preview(&mut self, now: f64) {
         let wanted = match self.urls().as_slice() {
             [url] if self.ytdlp.is_some() => Some((url.clone(), self.settings.playlist)),
             _ => None,
         };
         if wanted.as_ref() != self.preview.key() {
-            // Link mudou: descarta a prévia anterior (uma busca em andamento é ignorada).
+            // Link changed: drop the previous preview (an in-flight lookup is ignored).
             self.preview = match wanted {
                 Some(key) => Preview::Waiting { key, since: now },
                 None => Preview::None,
@@ -257,7 +257,7 @@ impl App {
 
         self.preview = match std::mem::replace(&mut self.preview, Preview::None) {
             Preview::Waiting { key, since } if now - since >= PREVIEW_DELAY_SECS => {
-                let exe = self.ytdlp.clone().expect("yt-dlp encontrado");
+                let exe = self.ytdlp.clone().expect("yt-dlp found");
                 let rx = fetch_media_info(exe, key.0.clone(), key.1, self.egui_ctx.clone());
                 Preview::Loading { key, rx }
             }
@@ -265,7 +265,7 @@ impl App {
                 Ok(Ok(info)) => Preview::Ready { key, info: Box::new(info) },
                 Ok(Err(error)) => Preview::Failed { key, error },
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    Preview::Failed { key, error: "a consulta foi interrompida".to_owned() }
+                    Preview::Failed { key, error: "the lookup was interrupted".to_owned() }
                 }
                 Err(mpsc::TryRecvError::Empty) => Preview::Loading { key, rx },
             },
@@ -290,11 +290,11 @@ impl App {
                     Preview::Waiting { .. } | Preview::Loading { .. } => {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.weak("Buscando informações do link…");
+                            ui.weak("Fetching link info…");
                         });
                     }
                     Preview::Failed { error, .. } => {
-                        ui.colored_label(ui.visuals().warn_fg_color, "Não foi possível obter as informações do link.");
+                        ui.colored_label(ui.visuals().warn_fg_color, "Couldn't fetch the link info.");
                         ui.add(egui::Label::new(egui::RichText::new(error).weak().small()).wrap());
                     }
                     Preview::Ready { info, .. } => self.media_info_view(ui, info),
@@ -324,29 +324,29 @@ impl App {
 
                 let mut meta: Vec<String> = Vec::new();
                 if let Some(count) = info.playlist_count {
-                    meta.push(if count == 1 { "Playlist • 1 vídeo".to_owned() } else { format!("Playlist • {count} vídeos") });
+                    meta.push(if count == 1 { "Playlist • 1 video".to_owned() } else { format!("Playlist • {count} videos") });
                 }
                 meta.extend(info.channel.clone());
                 if let Some(d) = info.duration {
-                    meta.push(if info.playlist_count.is_some() { format!("{} no total", format_duration(d)) } else { format_duration(d) });
+                    meta.push(if info.playlist_count.is_some() { format!("{} total", format_duration(d)) } else { format_duration(d) });
                 }
                 meta.extend(info.upload_date.clone());
                 if let Some(v) = info.views {
-                    meta.push(format!("{} visualizações", format_count(v)));
+                    meta.push(format!("{} views", format_count(v)));
                 }
                 ui.weak(meta.join("  •  "));
 
                 let mut details: Vec<String> = Vec::new();
                 if info.chapters > 0 {
-                    let chapters = if info.chapters == 1 { "1 capítulo".to_owned() } else { format!("{} capítulos", info.chapters) };
+                    let chapters = if info.chapters == 1 { "1 chapter".to_owned() } else { format!("{} chapters", info.chapters) };
                     details.push(if self.settings.split_chapters && !self.cut_enabled {
-                        format!("{chapters} (serão separados)")
+                        format!("{chapters} (will be split)")
                     } else {
                         chapters
                     });
                 }
                 if info.playlist_count.is_none() {
-                    // No corte, o tamanho é proporcional ao trecho.
+                    // When clipping, the size is proportional to the clip.
                     let fraction = match (self.cut_range(), info.duration) {
                         (Ok(Some((start, end))), Some(total)) if total > 0.0 => {
                             let end = end.map_or(total, |e| (e as f64).min(total));
@@ -357,11 +357,11 @@ impl App {
                     match info.estimated_size(&self.settings) {
                         Some(size) => {
                             let size = (size as f64 * fraction) as u64;
-                            let suffix = if fraction < 1.0 { " (trecho)" } else { "" };
-                            details.push(format!("Tamanho aprox.: {}{suffix}", format_size(size)));
+                            let suffix = if fraction < 1.0 { " (clip)" } else { "" };
+                            details.push(format!("Approx. size: {}{suffix}", format_size(size)));
                         }
                         None if !info.formats.is_empty() => {
-                            details.push("Tamanho não informado para esta qualidade".to_owned());
+                            details.push("Size not reported for this quality".to_owned());
                         }
                         None => {}
                     }
@@ -391,7 +391,7 @@ impl App {
 
     fn push_log(&mut self, line: impl Into<String>) {
         let line = line.into();
-        let is_error = line.starts_with("ERROR") || line.contains("ERRO:");
+        let is_error = line.starts_with("ERROR");
         self.log.push((line, is_error));
         if self.log.len() > MAX_LOG_LINES {
             let excess = self.log.len() - MAX_LOG_LINES;
@@ -407,17 +407,17 @@ impl App {
             .collect()
     }
 
-    /// Trecho a baixar em segundos (início, fim opcional), se o corte estiver ativo.
+    /// Clip to download in seconds (start, optional end), if clipping is on.
     fn cut_range(&self) -> Result<Option<(u64, Option<u64>)>, &'static str> {
         if !self.cut_enabled {
             return Ok(None);
         }
-        let start = parse_time(&self.cut_start).ok_or("Início inválido — use 1:30, 90 ou 1:02:03")?;
-        let end = parse_time(&self.cut_end).ok_or("Fim inválido — use 1:30, 90 ou 1:02:03")?;
+        let start = parse_time(&self.cut_start).ok_or("Invalid start — use 1:30, 90 or 1:02:03")?;
+        let end = parse_time(&self.cut_end).ok_or("Invalid end — use 1:30, 90 or 1:02:03")?;
         let start = start.unwrap_or(0);
         match end {
-            Some(end) if end <= start => Err("O fim precisa ser depois do início"),
-            None if start == 0 => Err("Informe o início e/ou o fim do trecho"),
+            Some(end) if end <= start => Err("The end must be after the start"),
+            None if start == 0 => Err("Enter the clip start and/or end"),
             _ => Ok(Some((start, end))),
         }
     }
@@ -427,9 +427,9 @@ impl App {
         let cut = self.cut_range().ok().flatten();
         let output = match cut {
             Some((start, end)) => format!(
-                "%(title)s (trecho {}-{}).%(ext)s",
+                "%(title)s (clip {}-{}).%(ext)s",
                 format_time(start),
-                end.map_or("fim".to_owned(), format_time)
+                end.map_or("end".to_owned(), format_time)
             ),
             None => "%(title)s.%(ext)s".to_owned(),
         };
@@ -477,7 +477,7 @@ impl App {
                     "--audio-quality".into(),
                     AUDIO_QUALITIES[s.audio_quality].1.into(),
                 ]);
-                // WAV não suporta capa embutida.
+                // WAV doesn't support embedded cover art.
                 if s.embed_thumbnail && fmt != "wav" {
                     a.extend(["--embed-thumbnail".into(), "--convert-thumbnails".into(), "jpg".into()]);
                 }
@@ -488,8 +488,8 @@ impl App {
             a.extend([
                 "--download-sections".into(),
                 format!("*{start}-{}", end.map_or("inf".to_owned(), |e| e.to_string())),
-                // Sem isso o corte começa no quadro-chave anterior (áudio saía com
-                // segundos a mais).
+                // Without this the clip starts at the previous keyframe (audio came
+                // out a few seconds too long).
                 "--force-keyframes-at-cuts".into(),
             ]);
         } else if s.split_chapters {
@@ -508,11 +508,11 @@ impl App {
     fn start_download(&mut self) {
         let urls = self.urls();
         if urls.is_empty() {
-            self.status = "Cole pelo menos um link válido (http/https).".into();
+            self.status = "Paste at least one valid link (http/https).".into();
             return;
         }
         let Some(exe) = self.ytdlp.clone() else {
-            self.status = "yt-dlp não encontrado. Instale primeiro.".into();
+            self.status = "yt-dlp not found. Install it first.".into();
             return;
         };
         if let Err(e) = self.cut_range() {
@@ -520,7 +520,7 @@ impl App {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&self.settings.out_dir) {
-            self.status = format!("Não foi possível criar a pasta de destino: {e}");
+            self.status = format!("Couldn't create the destination folder: {e}");
             return;
         }
         let args = self.build_args(&urls);
@@ -528,16 +528,16 @@ impl App {
         self.push_log(format!("> yt-dlp {}", args.join(" ")));
         self.progress = 0.0;
         self.item_info.clear();
-        self.run(JobKind::Download, &exe, &args, "Iniciando…");
+        self.run(JobKind::Download, &exe, &args, "Starting…");
     }
 
     fn install_or_update_ytdlp(&mut self) {
-        // Atualiza com o próprio yt-dlp (-U), que baixa do GitHub — a mesma fonte
-        // usada na checagem de versão. O catálogo do winget pode demorar a receber
-        // versões novas. O winget só é usado para a primeira instalação, porque
-        // também traz FFmpeg e Deno.
+        // Update with yt-dlp itself (-U), which downloads from GitHub — the same
+        // source as the version check. The winget catalog can lag behind new
+        // releases. winget is only used for the first install, because it also
+        // brings FFmpeg and Deno.
         let (exe, args, label): (PathBuf, Vec<String>, &str) = match &self.ytdlp {
-            Some(p) => (p.clone(), vec!["-U".into()], "Atualizando yt-dlp…"),
+            Some(p) => (p.clone(), vec!["-U".into()], "Updating yt-dlp…"),
             None => (
                 PathBuf::from("winget"),
                 [
@@ -551,7 +551,7 @@ impl App {
                 ]
                 .map(String::from)
                 .to_vec(),
-                "Instalando yt-dlp via winget (pode demorar)…",
+                "Installing yt-dlp via winget (this may take a while)…",
             ),
         };
         self.log.clear();
@@ -566,8 +566,8 @@ impl App {
                 self.job = Some(Job { kind, pid, rx, cancelled: false });
             }
             Err(e) => {
-                self.status = format!("Falha ao iniciar {}: {e}", exe.display());
-                self.push_log(format!("ERRO: {e}"));
+                self.status = format!("Failed to start {}: {e}", exe.display());
+                self.push_log(format!("ERROR: {e}"));
             }
         }
     }
@@ -575,13 +575,13 @@ impl App {
     fn cancel(&mut self) {
         if let Some(job) = &mut self.job {
             job.cancelled = true;
-            // /T encerra também os filhos (ffmpeg).
+            // /T also kills child processes (ffmpeg).
             let mut cmd = Command::new("taskkill");
             cmd.args(["/T", "/F", "/PID", &job.pid.to_string()]);
             #[cfg(windows)]
             cmd.creation_flags(CREATE_NO_WINDOW);
             let _ = cmd.output();
-            self.status = "Cancelando…".into();
+            self.status = "Cancelling…".into();
         }
     }
 
@@ -592,43 +592,43 @@ impl App {
             match msg {
                 Msg::Progress { pct, speed, eta } => {
                     self.progress = pct / 100.0;
-                    self.status = format!("Baixando… {pct:.1}%   {speed}   restante {eta}");
+                    self.status = format!("Downloading… {pct:.1}%   {speed}   ETA {eta}");
                 }
                 Msg::Line(line) => {
                     if let Some(rest) = line.strip_prefix("[download] Downloading item ") {
                         self.item_info = format!("Item {rest}");
                     } else if line.starts_with("[ExtractAudio]") {
-                        self.status = "Convertendo áudio…".into();
+                        self.status = "Converting audio…".into();
                     } else if line.starts_with("[Merger]") {
-                        self.status = "Juntando vídeo e áudio…".into();
+                        self.status = "Merging video and audio…".into();
                     } else if line.starts_with("[EmbedThumbnail]") {
-                        self.status = "Embutindo capa…".into();
+                        self.status = "Embedding cover art…".into();
                     } else if line.starts_with("[SplitChapters]") {
-                        self.status = "Separando capítulos…".into();
+                        self.status = "Splitting chapters…".into();
                     }
                     self.push_log(line);
                 }
                 Msg::Done(code) => {
-                    let job = self.job.take().expect("job ativo");
+                    let job = self.job.take().expect("active job");
                     let errors = self.log.iter().filter(|(_, e)| *e).count();
                     self.status = if job.cancelled {
-                        "Cancelado.".into()
+                        "Cancelled.".into()
                     } else if code == Some(0) {
                         self.progress = 1.0;
                         match job.kind {
-                            JobKind::Download => "Concluído! ✔".into(),
-                            JobKind::Tooling => "yt-dlp instalado/atualizado.".into(),
+                            JobKind::Download => "Done! ✔".into(),
+                            JobKind::Tooling => "yt-dlp installed/updated.".into(),
                         }
                     } else {
                         format!(
-                            "Terminou com erro (código {}, {errors} erro(s) no log).",
+                            "Finished with an error (code {}, {errors} error(s) in the log).",
                             code.map_or("?".to_owned(), |c| c.to_string())
                         )
                     };
                     if job.kind == JobKind::Tooling {
                         self.ytdlp = find_ytdlp();
                         if let Some(p) = &self.ytdlp {
-                            self.push_log(format!("yt-dlp em: {}", p.display()));
+                            self.push_log(format!("yt-dlp at: {}", p.display()));
                         }
                         self.update_dismissed = false;
                         self.start_version_check();
@@ -652,8 +652,8 @@ impl App {
         }
     }
 
-    /// Atalhos de teclado. Roda antes dos widgets para que o campo de links
-    /// não receba as mesmas teclas.
+    /// Keyboard shortcuts. Runs before the widgets so the links field
+    /// doesn't receive the same keys.
     fn handle_input(&mut self, ctx: &egui::Context) {
         let (start, cancel) = ctx.input_mut(|i| {
             (
@@ -680,25 +680,25 @@ impl App {
             ui.spacing_mut().item_spacing.x = 6.0;
 
             if busy {
-                let btn = egui::Button::new(egui::RichText::new("⏹  Cancelar").strong())
+                let btn = egui::Button::new(egui::RichText::new("⏹  Cancel").strong())
                     .fill(ui.visuals().error_fg_color.gamma_multiply(0.35));
-                if ui.add(btn).on_hover_text("Interromper (Esc)").clicked() {
+                if ui.add(btn).on_hover_text("Stop (Esc)").clicked() {
                     self.cancel();
                 }
             } else {
-                let btn = egui::Button::new(egui::RichText::new("⬇  Baixar").strong())
+                let btn = egui::Button::new(egui::RichText::new("⬇  Download").strong())
                     .fill(ui.visuals().selection.bg_fill);
                 let cut = self.cut_range();
                 let why_disabled = if self.ytdlp.is_none() {
-                    "Instale o yt-dlp primeiro"
+                    "Install yt-dlp first"
                 } else if let Err(e) = cut {
                     e
                 } else {
-                    "Cole um ou mais links"
+                    "Paste one or more links"
                 };
                 if ui
                     .add_enabled(self.ytdlp.is_some() && has_urls && cut.is_ok(), btn)
-                    .on_hover_text("Baixar os links (Ctrl+Enter)")
+                    .on_hover_text("Download the links (Ctrl+Enter)")
                     .on_disabled_hover_text(why_disabled)
                     .clicked()
                 {
@@ -709,18 +709,18 @@ impl App {
             ui.separator();
 
             ui.add_enabled_ui(!busy, |ui| {
-                ui.selectable_value(&mut self.settings.mode, Mode::Video, "🎞  Vídeo")
-                    .on_hover_text("Baixar vídeo (MP4)");
-                ui.selectable_value(&mut self.settings.mode, Mode::Audio, "🎵  Áudio")
-                    .on_hover_text("Extrair somente o áudio");
+                ui.selectable_value(&mut self.settings.mode, Mode::Video, "🎞  Video")
+                    .on_hover_text("Download video (MP4)");
+                ui.selectable_value(&mut self.settings.mode, Mode::Audio, "🎵  Audio")
+                    .on_hover_text("Extract audio only");
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("🌓", |ui| {
                     for (choice, label) in [
-                        (ThemeChoice::System, "Seguir o sistema"),
-                        (ThemeChoice::Light, "Claro"),
-                        (ThemeChoice::Dark, "Escuro"),
+                        (ThemeChoice::System, "Follow system"),
+                        (ThemeChoice::Light, "Light"),
+                        (ThemeChoice::Dark, "Dark"),
                     ] {
                         if ui.radio_value(&mut self.settings.theme, choice, label).clicked() {
                             choice.apply(ui.ctx());
@@ -729,13 +729,13 @@ impl App {
                     }
                 })
                 .response
-                .on_hover_text("Tema");
+                .on_hover_text("Theme");
 
-                // Atualizações são oferecidas pela faixa de aviso; aqui só a instalação.
+                // Updates are offered by the notice banner; this only handles installing.
                 if self.ytdlp.is_none()
                     && ui
-                        .add_enabled(!busy, egui::Button::new("⬇  Instalar yt-dlp"))
-                        .on_hover_text("Instalar yt-dlp, FFmpeg e Deno via winget")
+                        .add_enabled(!busy, egui::Button::new("⬇  Install yt-dlp"))
+                        .on_hover_text("Install yt-dlp, FFmpeg and Deno via winget")
                         .clicked()
                 {
                     self.install_or_update_ytdlp();
@@ -751,52 +751,52 @@ impl App {
         ui.add_enabled_ui(!busy, |ui| {
             match self.settings.mode {
                 Mode::Video => {
-                    section(ui, "🎞  Vídeo");
-                    ui.label("Qualidade");
+                    section(ui, "🎞  Video");
+                    ui.label("Quality");
                     combo(ui, "vq", &mut self.settings.video_quality, VIDEO_QUALITIES.iter().map(|q| q.0));
                     ui.add_space(2.0);
-                    ui.weak("Salvo em MP4 com o melhor áudio.");
+                    ui.weak("Saved as MP4 with the best audio.");
                 }
                 Mode::Audio => {
-                    section(ui, "🎵  Áudio");
-                    ui.label("Formato");
+                    section(ui, "🎵  Audio");
+                    ui.label("Format");
                     combo(ui, "af", &mut self.settings.audio_format, AUDIO_FORMATS.iter().map(|f| f.0));
                     ui.add_space(6.0);
                     let lossy = !matches!(AUDIO_FORMATS[self.settings.audio_format].1, "flac" | "wav" | "best");
                     ui.add_enabled_ui(lossy, |ui| {
-                        ui.label("Qualidade");
+                        ui.label("Quality");
                         combo(ui, "aq", &mut self.settings.audio_quality, AUDIO_QUALITIES.iter().map(|q| q.0));
                     });
                 }
             }
 
             ui.add_space(16.0);
-            section(ui, "⚙  Opções");
-            ui.checkbox(&mut self.settings.playlist, "Baixar playlist inteira")
-                .on_hover_text("Se o link fizer parte de uma playlist, baixa todos os itens");
-            ui.checkbox(&mut self.settings.embed_thumbnail, "Embutir capa")
-                .on_hover_text("Grava a miniatura do vídeo como capa do arquivo");
+            section(ui, "⚙  Options");
+            ui.checkbox(&mut self.settings.playlist, "Download whole playlist")
+                .on_hover_text("If the link is part of a playlist, download every item");
+            ui.checkbox(&mut self.settings.embed_thumbnail, "Embed cover art")
+                .on_hover_text("Saves the video thumbnail as the file's cover art");
             ui.add_enabled(
                 !self.cut_enabled,
-                egui::Checkbox::new(&mut self.settings.split_chapters, "Separar por capítulos"),
+                egui::Checkbox::new(&mut self.settings.split_chapters, "Split by chapters"),
             )
             .on_hover_text(
-                "Além do arquivo completo, cria um arquivo por capítulo (ex.: faixas de um álbum) \
-                 numa pasta com o nome do vídeo. Vídeos sem capítulos não são afetados.",
+                "Besides the full file, creates one file per chapter (e.g. album tracks) \
+                 in a folder named after the video. Videos without chapters are unaffected.",
             )
-            .on_disabled_hover_text("Indisponível ao baixar só um trecho");
+            .on_disabled_hover_text("Unavailable when downloading a clip");
 
             ui.add_space(16.0);
-            section(ui, "✂  Trecho");
-            ui.checkbox(&mut self.cut_enabled, "Baixar só um trecho")
-                .on_hover_text("Vale para todos os links da lista");
+            section(ui, "✂  Clip");
+            ui.checkbox(&mut self.cut_enabled, "Download only a clip")
+                .on_hover_text("Applies to every link in the list");
             ui.add_enabled_ui(self.cut_enabled, |ui| {
                 egui::Grid::new("cut").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-                    ui.label("Início");
+                    ui.label("Start");
                     ui.add(egui::TextEdit::singleline(&mut self.cut_start).desired_width(90.0).hint_text("0:00"));
                     ui.end_row();
-                    ui.label("Fim");
-                    ui.add(egui::TextEdit::singleline(&mut self.cut_end).desired_width(90.0).hint_text("até o fim"));
+                    ui.label("End");
+                    ui.add(egui::TextEdit::singleline(&mut self.cut_end).desired_width(90.0).hint_text("to the end"));
                     ui.end_row();
                 });
                 match self.cut_range() {
@@ -804,20 +804,20 @@ impl App {
                         ui.colored_label(ui.visuals().error_fg_color, e);
                     }
                     _ => {
-                        ui.weak("Ex.: 1:30, 90 ou 1:02:03");
+                        ui.weak("E.g. 1:30, 90 or 1:02:03");
                     }
                 }
             });
 
             ui.add_space(16.0);
-            section(ui, "🗀  Destino");
+            section(ui, "🗀  Destination");
             ui.add(egui::Label::new(self.settings.out_dir.display().to_string()).wrap());
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if ui.button("Alterar…").clicked() {
+                if ui.button("Change…").clicked() {
                     self.choose_folder();
                 }
-                if ui.button("Abrir").clicked() {
+                if ui.button("Open").clicked() {
                     self.open_folder();
                 }
             });
@@ -829,7 +829,7 @@ impl App {
 
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Links").strong());
-            ui.weak("um por linha — vídeos ou playlists");
+            ui.weak("one per line — videos or playlists");
             let count = self.urls().len();
             if count > 0 {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -843,7 +843,7 @@ impl App {
                 .id_salt("urls")
                 .desired_rows(5)
                 .desired_width(f32::INFINITY)
-                .hint_text("Cole aqui: https://www.youtube.com/watch?v=…"),
+                .hint_text("Paste here: https://www.youtube.com/watch?v=…"),
         );
         self.preview_card(ui);
 
@@ -851,7 +851,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Log").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(!self.log.is_empty(), egui::Button::new("Limpar log").small()).clicked() {
+                if ui.add_enabled(!self.log.is_empty(), egui::Button::new("Clear log").small()).clicked() {
                     self.log.clear();
                 }
             });
@@ -868,7 +868,7 @@ impl App {
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
                         if self.log.is_empty() {
-                            ui.weak("Nenhuma atividade ainda.");
+                            ui.weak("No activity yet.");
                         }
                         for (line, is_error) in &self.log {
                             let mut text = egui::RichText::new(line).monospace().size(11.5);
@@ -892,14 +892,14 @@ impl App {
                 .animate(busy && (self.progress == 0.0 || !running_download)),
         );
         ui.horizontal(|ui| {
-            // Direita primeiro, para o status (à esquerda) truncar no espaço que sobra.
+            // Right side first, so the status (on the left) truncates in the space left.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let version = self.ytdlp_version.as_deref().unwrap_or("");
                 let (label, color, tip) = match (&self.ytdlp, &self.update_available) {
                     (Some(p), Some(latest)) => (
-                        format!("yt-dlp {version} — atualização disponível"),
+                        format!("yt-dlp {version} — update available"),
                         ui.visuals().warn_fg_color,
-                        format!("Versão nova: {latest}\n{}", p.display()),
+                        format!("New version: {latest}\n{}", p.display()),
                     ),
                     (Some(p), None) => (
                         format!("yt-dlp {version}").trim_end().to_owned(),
@@ -907,9 +907,9 @@ impl App {
                         p.display().to_string(),
                     ),
                     (None, _) => (
-                        "yt-dlp ausente".to_owned(),
+                        "yt-dlp missing".to_owned(),
                         ui.visuals().error_fg_color,
-                        "Use \"Instalar yt-dlp\" na barra de ferramentas".to_owned(),
+                        "Use \"Install yt-dlp\" in the toolbar".to_owned(),
                     ),
                 };
                 ui.label(egui::RichText::new(label).small()).on_hover_text(&tip);
@@ -933,15 +933,15 @@ impl App {
         let busy = self.job.is_some();
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Nova versão do yt-dlp disponível").strong());
-            ui.label(format!("{latest}  (instalada: {installed})"));
+            ui.label(egui::RichText::new("New yt-dlp version available").strong());
+            ui.label(format!("{latest}  (installed: {installed})"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("✖").on_hover_text("Dispensar").clicked() {
+                if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
                     self.update_dismissed = true;
                 }
                 if ui
-                    .add_enabled(!busy, egui::Button::new("🔄  Atualizar agora"))
-                    .on_disabled_hover_text("Aguarde o download atual terminar")
+                    .add_enabled(!busy, egui::Button::new("🔄  Update now"))
+                    .on_disabled_hover_text("Wait for the current download to finish")
                     .clicked()
                 {
                     self.install_or_update_ytdlp();
@@ -1012,9 +1012,9 @@ fn combo<'a>(ui: &mut egui::Ui, id: &str, selected: &mut usize, items: impl Iter
         });
 }
 
-/// PATH atualizado: o do processo + o do registro (usuário e máquina).
-/// O winget adiciona yt-dlp, ffmpeg e deno ao PATH do registro, que este
-/// processo só enxergaria depois de reiniciar o Explorer/sessão.
+/// Up-to-date PATH: the process's own plus the registry's (user and machine).
+/// winget adds yt-dlp, ffmpeg and deno to the registry PATH, which this
+/// process would only see after restarting Explorer or the session.
 fn search_paths() -> Vec<PathBuf> {
     let mut dirs_out: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
@@ -1048,7 +1048,7 @@ fn search_paths() -> Vec<PathBuf> {
     dirs_out
 }
 
-/// Expande variáveis no formato %VAR% (valores REG_EXPAND_SZ).
+/// Expands %VAR% variables (REG_EXPAND_SZ values).
 fn expand_env(s: &str) -> String {
     let mut out = String::new();
     let mut parts = s.split('%');
@@ -1074,7 +1074,7 @@ fn expand_env(s: &str) -> String {
 
 const YTDLP_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
 
-/// Resultado da checagem de versão do yt-dlp feita em segundo plano.
+/// Result of the background yt-dlp version check.
 struct VersionInfo {
     installed: Option<String>,
     latest: Option<String>,
@@ -1091,8 +1091,8 @@ fn check_ytdlp_version(exe: PathBuf, ctx: egui::Context) -> Receiver<VersionInfo
     rx
 }
 
-/// Processo sem janela de console, com saída em UTF-8 e PATH que inclui o que o
-/// winget instalou (ffmpeg/deno), mesmo que este processo tenha o PATH antigo.
+/// Process with no console window, UTF-8 output and a PATH that includes what
+/// winget installed (ffmpeg/deno), even if this process has a stale PATH.
 fn background_command(exe: &Path) -> Command {
     let mut cmd = Command::new(exe);
     cmd.stdin(Stdio::null())
@@ -1120,7 +1120,7 @@ fn installed_ytdlp_version(exe: &Path) -> Option<String> {
     (out.status.success() && !version.is_empty()).then_some(version)
 }
 
-/// Última versão publicada no GitHub. Sem internet, simplesmente não avisa.
+/// Latest version published on GitHub. Without internet, there is simply no notice.
 fn latest_ytdlp_version() -> Option<String> {
     let mut resp = http_agent()
         .get(YTDLP_LATEST_RELEASE_URL)
@@ -1132,13 +1132,13 @@ fn latest_ytdlp_version() -> Option<String> {
     json.get("tag_name")?.as_str().map(str::to_owned)
 }
 
-/// Versões do yt-dlp são datas (2026.08.19), às vezes com um sufixo (.1).
+/// yt-dlp versions are dates (2026.08.19), sometimes with a suffix (.1).
 fn is_newer(latest: &str, installed: &str) -> bool {
     let parse = |s: &str| -> Vec<u64> { s.trim().split('.').map(|p| p.parse().unwrap_or(0)).collect() };
     parse(latest) > parse(installed)
 }
 
-/// Lê "90", "1:30" ou "1:02:03" como segundos. Vazio = `Some(None)`; inválido = `None`.
+/// Parses "90", "1:30" or "1:02:03" as seconds. Empty = `Some(None)`; invalid = `None`.
 fn parse_time(s: &str) -> Option<Option<u64>> {
     let s = s.trim();
     if s.is_empty() {
@@ -1149,14 +1149,14 @@ fn parse_time(s: &str) -> Option<Option<u64>> {
         return None;
     }
     let nums: Vec<u64> = parts.iter().map(|p| p.parse().ok()).collect::<Option<_>>()?;
-    // Minutos e segundos depois do primeiro campo precisam ficar abaixo de 60.
+    // Minutes and seconds after the first field must be below 60.
     if nums.iter().skip(1).any(|&n| n >= 60) {
         return None;
     }
     Some(Some(nums.iter().fold(0, |acc, n| acc * 60 + n)))
 }
 
-/// Tempo para nome de arquivo (sem ":" que o Windows não aceita): 1m30s, 1h02m03s.
+/// Time for file names (no ":", which Windows rejects): 1m30s, 1h02m03s.
 fn format_time(secs: u64) -> String {
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
     match (h, m) {
@@ -1166,21 +1166,21 @@ fn format_time(secs: u64) -> String {
     }
 }
 
-/// Dados mostrados na prévia de um link, antes de baixar.
+/// Data shown in a link's preview, before downloading.
 struct MediaInfo {
     title: String,
     channel: Option<String>,
-    /// Em segundos. Numa playlist, a soma dos vídeos.
+    /// In seconds. For a playlist, the sum of its videos.
     duration: Option<f64>,
-    /// dd/mm/aaaa
+    /// YYYY-MM-DD
     upload_date: Option<String>,
     views: Option<u64>,
     chapters: usize,
-    /// `Some(n)` quando o link é uma playlist com n vídeos.
+    /// `Some(n)` when the link is a playlist with n videos.
     playlist_count: Option<usize>,
     formats: Vec<FormatInfo>,
     thumbnail_url: Option<String>,
-    /// (uri para o egui, bytes da imagem), baixada junto com as informações.
+    /// (uri for egui, image bytes), downloaded along with the info.
     thumbnail: Option<(String, egui::load::Bytes)>,
 }
 
@@ -1192,23 +1192,23 @@ struct FormatInfo {
     fps: f64,
     has_video: bool,
     has_audio: bool,
-    /// Campo `preference`: o yt-dlp o coloca à frente de qualquer outro
-    /// critério. No YouTube é negativo nas faixas de áudio dubladas; ausente = 0.
+    /// `preference` field: yt-dlp ranks it ahead of every other criterion.
+    /// On YouTube it is negative for dubbed audio tracks; missing = 0.
     preference: i64,
-    /// Campo `source_preference` (99 nos formatos "Premium" do YouTube). O
-    /// extrator do YouTube o compara antes do codec.
+    /// `source_preference` field (99 on YouTube "Premium" formats). The
+    /// YouTube extractor compares it before the codec.
     source_preference: i64,
-    /// Maior no idioma original do vídeo.
+    /// Higher for the video's original language.
     language_preference: i64,
     quality: f64,
     tbr: f64,
     abr: f64,
-    /// Formatos m3u8 costumam não informar o tamanho.
+    /// m3u8 formats usually don't report their size.
     size: Option<u64>,
 }
 
 impl FormatInfo {
-    /// Preferência padrão do yt-dlp entre codecs de vídeo (AV1 > VP9 > H.264).
+    /// yt-dlp's default video codec preference (AV1 > VP9 > H.264).
     fn vcodec_rank(&self) -> u8 {
         match self.vcodec.split('.').next().unwrap_or("") {
             "av01" => 3,
@@ -1218,7 +1218,7 @@ impl FormatInfo {
         }
     }
 
-    /// Preferência padrão do yt-dlp entre codecs de áudio (Opus > AAC).
+    /// yt-dlp's default audio codec preference (Opus > AAC).
     fn acodec_rank(&self) -> u8 {
         match self.acodec.split('.').next().unwrap_or("") {
             "opus" => 2,
@@ -1242,7 +1242,7 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
 
     let upload_date = str_field("upload_date")
         .filter(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()))
-        .map(|d| format!("{}/{}/{}", &d[6..8], &d[4..6], &d[0..4]));
+        .map(|d| format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]));
 
     let mut formats: Vec<FormatInfo> = Vec::new();
     for f in v.get("formats").and_then(|f| f.as_array()).into_iter().flatten() {
@@ -1272,7 +1272,7 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
     }
 
     MediaInfo {
-        title: str_field("title").unwrap_or_else(|| "(sem título)".to_owned()),
+        title: str_field("title").unwrap_or_else(|| "(untitled)".to_owned()),
         channel: str_field("channel").or_else(|| str_field("uploader")),
         duration,
         upload_date,
@@ -1289,7 +1289,7 @@ fn parse_media_info(v: &serde_json::Value) -> MediaInfo {
     }
 }
 
-/// Miniatura pequena (~320px) em formato que sabemos exibir.
+/// Small thumbnail (~320px) in a format we can display.
 fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
     let supported = |url: &str| {
         let path = url.split('?').next().unwrap_or(url).to_lowercase();
@@ -1316,12 +1316,12 @@ fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
 }
 
 impl MediaInfo {
-    /// Tamanho aproximado do arquivo final com as opções atuais. Imita a ordem
-    /// em que o yt-dlp escolhe formatos no YouTube com os argumentos do app:
-    /// `preference`, depois os critérios de `-S` (resolução, mp4/m4a), depois
-    /// a ordem do extrator (qualidade, fps, `source_preference`, codec…). Na
-    /// conversão de áudio usa o bitrate de destino. `None` se o formato
-    /// escolhido não informa o tamanho (comum nos "Premium", servidos por m3u8).
+    /// Approximate size of the final file with the current options. Mimics the
+    /// order in which yt-dlp picks YouTube formats with the app's arguments:
+    /// `preference`, then the `-S` criteria (resolution, mp4/m4a), then the
+    /// extractor's order (quality, fps, `source_preference`, codec…). For audio
+    /// conversion it uses the target bitrate. `None` if the chosen format
+    /// doesn't report its size (common for "Premium" formats served via m3u8).
     fn estimated_size(&self, s: &Settings) -> Option<u64> {
         use std::cmp::Ordering;
         let by = |a: f64, b: f64| a.partial_cmp(&b).unwrap_or(Ordering::Equal);
@@ -1366,11 +1366,11 @@ impl MediaInfo {
                 let kbps = match fmt {
                     "best" => return source.size,
                     "wav" => 1411.0,
-                    // FLAC varia muito com o conteúdo; ~900 kbps é típico de música.
+                    // FLAC varies a lot with the content; ~900 kbps is typical for music.
                     "flac" => 900.0,
                     _ => match AUDIO_QUALITIES[s.audio_quality].1.strip_suffix('K') {
                         Some(k) => k.parse().ok()?,
-                        // VBR 0: MP3 fica perto de 245 kbps; Opus/AAC seguem a fonte.
+                        // VBR 0: MP3 lands near 245 kbps; Opus/AAC follow the source.
                         None if fmt == "mp3" => 245.0,
                         None => source.abr.max(96.0),
                     },
@@ -1381,7 +1381,7 @@ impl MediaInfo {
     }
 }
 
-/// Busca as informações do link com `yt-dlp -J` (e a miniatura) em segundo plano.
+/// Fetches the link info with `yt-dlp -J` (and the thumbnail) in the background.
 fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Context) -> Receiver<Result<MediaInfo, String>> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -1404,11 +1404,11 @@ fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Contex
                     .lines()
                     .find_map(|l| l.strip_prefix("ERROR: "))
                     .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
-                    .unwrap_or("o yt-dlp não retornou informações");
+                    .unwrap_or("yt-dlp returned no information");
                 return Err(msg.trim().to_owned());
             }
             let json: serde_json::Value =
-                serde_json::from_slice(&out.stdout).map_err(|e| format!("resposta inválida do yt-dlp: {e}"))?;
+                serde_json::from_slice(&out.stdout).map_err(|e| format!("invalid response from yt-dlp: {e}"))?;
             let mut info = parse_media_info(&json);
             if let Some(thumb_url) = &info.thumbnail_url {
                 info.thumbnail = download_thumbnail(thumb_url);
@@ -1424,7 +1424,7 @@ fn fetch_media_info(exe: PathBuf, url: String, playlist: bool, ctx: egui::Contex
 fn download_thumbnail(url: &str) -> Option<(String, egui::load::Bytes)> {
     let mut resp = http_agent().get(url).call().ok()?;
     let bytes = resp.body_mut().read_to_vec().ok()?;
-    // A extensão no uri ajuda o carregador de imagens a identificar o formato.
+    // The extension in the uri helps the image loader detect the format.
     let ext = url.split('?').next()?.rsplit('.').next()?.to_lowercase();
     Some((format!("bytes://thumb/{:x}.{ext}", hash_str(url)), bytes.into()))
 }
@@ -1436,31 +1436,30 @@ fn hash_str(s: &str) -> u64 {
     h.finish()
 }
 
-/// 3:25 ou 1:02:03
+/// 3:25 or 1:02:03
 fn format_duration(secs: f64) -> String {
     let secs = secs.round() as u64;
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
 }
 
-/// 2.814.943 (separador de milhar brasileiro)
+/// 2,814,943
 fn format_count(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push('.');
+            out.push(',');
         }
         out.push(c);
     }
     out
 }
 
-/// 2,8 MB / 1,2 GB
+/// 2.8 MB / 1.2 GB
 fn format_size(bytes: u64) -> String {
     let mb = bytes as f64 / 1_048_576.0;
-    let text = if mb >= 1024.0 { format!("{:.1} GB", mb / 1024.0) } else if mb >= 10.0 { format!("{mb:.0} MB") } else { format!("{mb:.1} MB") };
-    text.replace('.', ",")
+    if mb >= 1024.0 { format!("{:.1} GB", mb / 1024.0) } else if mb >= 10.0 { format!("{mb:.0} MB") } else { format!("{mb:.1} MB") }
 }
 
 fn find_ytdlp() -> Option<PathBuf> {
@@ -1501,7 +1500,7 @@ fn read_lines(stream: impl Read, tx: &Sender<Msg>) {
             Ok(_) => {}
         }
         let text = String::from_utf8_lossy(&buf);
-        // winget usa \r para animar o progresso; fica só com o último trecho.
+        // winget uses \r to animate progress; keep only the last segment.
         let line = text.trim_end().rsplit('\r').next().unwrap_or("").trim_end().to_owned();
         if line.trim().is_empty() {
             continue;
@@ -1543,7 +1542,7 @@ mod tests {
     use super::{format_time, is_newer, parse_time};
 
     #[test]
-    fn le_tempos_do_trecho() {
+    fn parses_clip_times() {
         assert_eq!(parse_time(""), Some(None));
         assert_eq!(parse_time("  "), Some(None));
         assert_eq!(parse_time("90"), Some(Some(90)));
@@ -1559,7 +1558,7 @@ mod tests {
     }
 
     #[test]
-    fn formata_tempo_para_nome_de_arquivo() {
+    fn formats_time_for_file_names() {
         assert_eq!(format_time(0), "0s");
         assert_eq!(format_time(45), "45s");
         assert_eq!(format_time(90), "1m30s");
@@ -1567,7 +1566,7 @@ mod tests {
     }
 
     #[test]
-    fn compara_versoes_do_ytdlp() {
+    fn compares_ytdlp_versions() {
         assert!(is_newer("2026.09.02", "2026.08.19"));
         assert!(is_newer("2026.08.19.1", "2026.08.19"));
         assert!(is_newer("2027.01.01", "2026.12.31"));
@@ -1593,9 +1592,9 @@ mod preview_tests {
     }
 
     #[test]
-    fn le_video_e_estima_tamanho() {
+    fn parses_video_and_estimates_size() {
         let json = serde_json::json!({
-            "_type": "video", "title": "Teste", "channel": "Canal", "duration": 100.0,
+            "_type": "video", "title": "Test", "channel": "Channel", "duration": 100.0,
             "upload_date": "20200616", "view_count": 2814943,
             "chapters": [{"title": "a"}, {"title": "b"}],
             "thumbnails": [
@@ -1614,34 +1613,34 @@ mod preview_tests {
             ]
         });
         let info = parse_media_info(&json);
-        assert_eq!(info.title, "Teste");
-        assert_eq!(info.channel.as_deref(), Some("Canal"));
-        assert_eq!(info.upload_date.as_deref(), Some("16/06/2020"));
+        assert_eq!(info.title, "Test");
+        assert_eq!(info.channel.as_deref(), Some("Channel"));
+        assert_eq!(info.upload_date.as_deref(), Some("2020-06-16"));
         assert_eq!(info.chapters, 2);
         assert_eq!(info.playlist_count, None);
         assert_eq!(info.formats.len(), 7);
         assert_eq!(info.thumbnail_url.as_deref(), Some("https://x/mq.jpg"));
 
-        // Melhor: 4K VP9 + áudio m4a.
+        // Best: 4K VP9 + m4a audio.
         assert_eq!(info.estimated_size(&settings(Mode::Video)), Some(91_000));
-        // Até 1080p: prefere mp4 e AV1 (15.000) + m4a.
+        // Up to 1080p: prefers mp4 and AV1 (15,000) + m4a.
         let mut s = settings(Mode::Video);
         s.video_quality = 3;
         assert_eq!(info.estimated_size(&s), Some(16_000));
-        // Áudio original: melhor áudio (opus 140 kbps).
+        // Original audio: best audio (opus 140 kbps).
         let mut s = settings(Mode::Audio);
         s.audio_format = 5;
         assert_eq!(info.estimated_size(&s), Some(1_200));
-        // MP3 320 kbps por 100 s = 4.000.000 bytes.
+        // MP3 320 kbps for 100 s = 4,000,000 bytes.
         s.audio_format = 0;
         s.audio_quality = 1;
         assert_eq!(info.estimated_size(&s), Some(4_000_000));
     }
 
     #[test]
-    fn formato_premium_sem_tamanho_nao_estima() {
-        // Como no YouTube: o "Premium" (source_preference 99) vence o AV1 da
-        // mesma altura; sem tamanho informado, não inventa um número.
+    fn premium_format_without_size_is_not_estimated() {
+        // As on YouTube: "Premium" (source_preference 99) beats AV1 at the same
+        // height; with no reported size, don't make up a number.
         let json = serde_json::json!({
             "duration": 100.0,
             "formats": [
@@ -1655,13 +1654,13 @@ mod preview_tests {
         let info = parse_media_info(&json);
         assert_eq!(info.estimated_size(&settings(Mode::Video)), None);
         let mut s = settings(Mode::Video);
-        s.video_quality = 4; // 720p: o Premium fica de fora
+        s.video_quality = 4; // 720p: Premium is excluded
         assert_eq!(info.estimated_size(&s), Some(9_000));
     }
 
     #[test]
-    fn prefere_faixa_de_audio_original() {
-        // Faixas dubladas têm "preference" negativo; a original não tem o campo.
+    fn prefers_original_audio_track() {
+        // Dubbed tracks have a negative "preference"; the original has none.
         let mut dub = fmt("m4a", "none", "mp4a.40.2", None, 200.0, 5_000);
         dub["preference"] = serde_json::json!(-3);
         let json = serde_json::json!({
@@ -1674,29 +1673,29 @@ mod preview_tests {
     }
 
     #[test]
-    fn le_playlist() {
+    fn parses_playlist() {
         let json = serde_json::json!({
-            "_type": "playlist", "title": "Lista", "uploader": "Canal", "playlist_count": 3,
+            "_type": "playlist", "title": "List", "uploader": "Channel", "playlist_count": 3,
             "entries": [{"duration": 60.0}, {"duration": 90.0}, {"duration": null}],
             "thumbnail": "https://x/a.webp"
         });
         let info = parse_media_info(&json);
         assert_eq!(info.playlist_count, Some(3));
-        assert_eq!(info.channel.as_deref(), Some("Canal"));
+        assert_eq!(info.channel.as_deref(), Some("Channel"));
         assert_eq!(info.duration, Some(150.0));
         assert_eq!(info.thumbnail_url.as_deref(), Some("https://x/a.webp"));
     }
 
     #[test]
-    fn formata_numeros() {
-        assert_eq!(format_count(2_814_943), "2.814.943");
+    fn formats_numbers() {
+        assert_eq!(format_count(2_814_943), "2,814,943");
         assert_eq!(format_count(999), "999");
-        assert_eq!(format_count(1_000), "1.000");
+        assert_eq!(format_count(1_000), "1,000");
         assert_eq!(format_duration(79.4), "1:19");
         assert_eq!(format_duration(3723.0), "1:02:03");
-        assert_eq!(format_size(2_936_013), "2,8 MB");
+        assert_eq!(format_size(2_936_013), "2.8 MB");
         assert_eq!(format_size(52_428_800), "50 MB");
-        assert_eq!(format_size(1_288_490_189), "1,2 GB");
+        assert_eq!(format_size(1_288_490_189), "1.2 GB");
     }
 }
 

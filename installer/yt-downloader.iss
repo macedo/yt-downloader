@@ -1,5 +1,5 @@
-﻿; Instalador do YT Downloader (Inno Setup 6).
-; Gere com installer\build.ps1, que compila o app e passa a versão do Cargo.toml.
+; YT Downloader installer (Inno Setup 6).
+; Build it with installer\build.ps1, which compiles the app and passes the version from Cargo.toml.
 
 #define AppName "YT Downloader"
 #define AppExe "yt-downloader.exe"
@@ -16,7 +16,7 @@ AppPublisher=macedo
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-; Instala só para o usuário atual: não pede admin e o winget instala no mesmo perfil.
+; Per-user install: no admin prompt, and winget installs into the same profile.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
@@ -31,10 +31,10 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
-Name: "ptbr"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "deps"; Description: "Instalar/atualizar dependências via winget (yt-dlp, FFmpeg e Deno)"; GroupDescription: "Dependências:"
+Name: "deps"; Description: "Install/update dependencies via winget (yt-dlp, FFmpeg and Deno)"; GroupDescription: "Dependencies:"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
@@ -48,8 +48,8 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Configurações salvas pelo app. As dependências do winget são mantidas,
-; pois podem ser usadas por outros programas.
+; Settings saved by the app. The winget dependencies are kept, since other
+; programs may use them.
 Type: filesandordirs; Name: "{userappdata}\yt-downloader"
 
 [Code]
@@ -82,12 +82,12 @@ procedure WingetInstall(const Id, Name: String);
 var
   Code: Integer;
 begin
-  WizardForm.StatusLabel.Caption := 'Instalando ' + Name + ' (winget)... isso pode levar alguns minutos.';
+  WizardForm.StatusLabel.Caption := 'Installing ' + Name + ' (winget)... this may take a few minutes.';
   WizardForm.Refresh;
-  // "install" também atualiza se já existir uma versão antiga.
+  // "install" also upgrades an older version if one is present.
   Code := RunHidden('winget install -e --id ' + Id +
     ' --accept-package-agreements --accept-source-agreements --silent --disable-interactivity');
-  Log(Format('winget install %s terminou com código %d', [Id, Code]));
+  Log(Format('winget install %s finished with code %d', [Id, Code]));
 end;
 
 procedure InstallDependencies();
@@ -95,9 +95,9 @@ begin
   if not WingetAvailable() then
   begin
     SuppressibleMsgBox(
-      'O winget (Gerenciador de Pacotes do Windows) não foi encontrado.' + #13#10 +
-      'Instale o "Instalador de Aplicativo" pela Microsoft Store e depois use o botão ' +
-      '"Instalar yt-dlp" dentro do YT Downloader.', mbInformation, MB_OK, IDOK);
+      'winget (Windows Package Manager) was not found.' + #13#10 +
+      'Install "App Installer" from the Microsoft Store, then use the ' +
+      '"Install yt-dlp" button inside YT Downloader.', mbInformation, MB_OK, IDOK);
     Exit;
   end;
 
@@ -112,8 +112,8 @@ begin
 
   if not YtDlpInstalled() then
     SuppressibleMsgBox(
-      'Não foi possível confirmar a instalação do yt-dlp.' + #13#10 +
-      'Se o app avisar que ele não foi encontrado, use o botão "Instalar yt-dlp" dentro do programa.',
+      'Could not confirm that yt-dlp was installed.' + #13#10 +
+      'If the app says it cannot find it, use the "Install yt-dlp" button inside the program.',
       mbInformation, MB_OK, IDOK);
 end;
 

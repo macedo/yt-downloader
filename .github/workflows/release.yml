@@ -1,5 +1,5 @@
-# Ao enviar uma tag vX.Y.Z: testa, gera o instalador e publica um Release
-# no GitHub com o changelog (commits desde a tag anterior), o instalador e o
+# On a vX.Y.Z tag push: test, build the installer and publish a GitHub Release
+# with the changelog (commits since the previous tag), the installer and its
 # checksum.
 name: Release
 
@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Histórico completo e tags, para montar o changelog desde a tag anterior.
+          # Full history and tags, to build the changelog since the previous tag.
           fetch-depth: 0
 
-      - name: Conferir se a tag bate com a versão do Cargo.toml
+      - name: Check that the tag matches the Cargo.toml version
         shell: pwsh
         env:
           TAG: ${{ github.ref_name }}
@@ -27,7 +27,7 @@ jobs:
           $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
               Select-Object -First 1).Matches[0].Groups[1].Value
           if ($env:TAG -ne "v$cargo") {
-              Write-Error "A tag $env:TAG não bate com a versão do Cargo.toml ($cargo). Atualize o Cargo.toml e crie a tag v$cargo."
+              Write-Error "Tag $env:TAG does not match the Cargo.toml version ($cargo). Update Cargo.toml and create tag v$cargo."
               exit 1
           }
 
@@ -35,21 +35,21 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Testes
+      - name: Tests
         run: cargo test --release
 
-      - name: Instalar Inno Setup
+      - name: Install Inno Setup
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
               choco install innosetup -y --no-progress
           }
 
-      - name: Gerar instalador
+      - name: Build installer
         shell: pwsh
         run: ./installer/build.ps1
 
-      - name: Calcular SHA-256
+      - name: Compute SHA-256
         shell: pwsh
         run: |
           Get-ChildItem dist/*.exe | ForEach-Object {
@@ -57,7 +57,7 @@ jobs:
           } | Set-Content dist/SHA256SUMS.txt
           Get-Content dist/SHA256SUMS.txt
 
-      - name: Gerar changelog
+      - name: Generate changelog
         shell: pwsh
         env:
           TAG: ${{ github.ref_name }}
@@ -66,7 +66,7 @@ jobs:
           ./installer/changelog.ps1 -Tag $env:TAG -Repo $env:REPO | Set-Content dist/RELEASE_NOTES.md -Encoding utf8
           Get-Content dist/RELEASE_NOTES.md
 
-      - name: Publicar Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v3
         with:
           body_path: dist/RELEASE_NOTES.md

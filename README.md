@@ -1,63 +1,63 @@
 # YT Downloader
 
-App para Windows que baixa vídeos e áudio do YouTube (e de outros sites suportados pelo [yt-dlp](https://github.com/yt-dlp/yt-dlp)), com interface gráfica nativa escrita em Rust ([egui](https://github.com/emilk/egui)).
+A Windows app for downloading video and audio from YouTube (and other sites supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp)), with a native GUI written in Rust ([egui](https://github.com/emilk/egui)).
 
-O app é uma interface para o `yt-dlp`: ele monta os argumentos, acompanha o progresso e mostra o resultado. Os downloads e conversões são feitos pelo yt-dlp e pelo FFmpeg.
+The app is a front end for `yt-dlp`: it builds the arguments, tracks progress and shows the result. Downloads and conversions are done by yt-dlp and FFmpeg.
 
-## Funcionalidades
+## Features
 
-- **Vídeo (MP4)** em qualidade de "Melhor disponível" até 360p
-- **Somente áudio** em MP3, M4A, Opus, FLAC, WAV ou no formato original, com escolha de bitrate
-- **Prévia do link**: ao colar um link, mostra miniatura, título, canal, duração, capítulos e o tamanho aproximado do arquivo
-- **Vários links** de uma vez (um por linha) e **playlists inteiras**
-- **Separar por capítulos**: um arquivo por capítulo, útil para álbuns completos
-- **Baixar só um trecho**, por exemplo de `1:30` a `2:45`
-- **Capa e metadados** embutidos no arquivo
-- **Aviso de versão nova do yt-dlp** ao abrir o app, com atualização em um clique
-- Tema claro, escuro ou do sistema; configurações salvas entre usos
-- Atalhos: **Ctrl+Enter** baixa, **Esc** cancela
+- **Video (MP4)** in qualities from "Best available" down to 360p
+- **Audio only** as MP3, M4A, Opus, FLAC, WAV or the original format, with a choice of bitrate
+- **Link preview**: when you paste a link, shows the thumbnail, title, channel, duration, chapters and approximate file size
+- **Several links** at once (one per line) and **whole playlists**
+- **Split by chapters**: one file per chapter, handy for full albums
+- **Download only a clip**, e.g. from `1:30` to `2:45`
+- **Cover art and metadata** embedded in the file
+- **New yt-dlp version notice** when the app opens, with one-click update
+- Light, dark or system theme; settings are remembered between sessions
+- Shortcuts: **Ctrl+Enter** downloads, **Esc** cancels
 
-## Instalação
+## Installation
 
-Baixe o instalador `YT-Downloader-Setup-<versão>.exe` na página de [Releases](https://github.com/macedo/yt-downloader/releases) e execute-o:
+Download `YT-Downloader-Setup-<version>.exe` from the [Releases](https://github.com/macedo/yt-downloader/releases) page and run it:
 
-- Não precisa de administrador; instala para o usuário atual em `%LOCALAPPDATA%\Programs\YT Downloader`.
-- Por padrão, instala ou atualiza as dependências pelo **winget**: yt-dlp, FFmpeg e Deno. O Deno é exigido pelo YouTube atualmente.
-- Para atualizar o app, execute o instalador da versão nova por cima da atual.
+- No admin rights needed; it installs for the current user in `%LOCALAPPDATA%\Programs\YT Downloader`.
+- By default it installs or updates the dependencies through **winget**: yt-dlp, FFmpeg and Deno. YouTube currently requires Deno.
+- To update the app, run the newer installer over the current install.
 
-O instalador e o app **não têm assinatura digital**. Por isso:
+The installer and the app are **not digitally signed**. Because of that:
 
-- O Windows SmartScreen pode mostrar um alerta de "editor desconhecido". Clique em **Mais informações → Executar assim mesmo**.
-- Em PCs com o **Smart App Control** ligado, o app é bloqueado.
+- Windows SmartScreen may show an "unknown publisher" warning. Click **More info → Run anyway**.
+- On PCs with **Smart App Control** turned on, the app is blocked.
 
-### Requisitos
+### Requirements
 
-- Windows 10 ou 11 (64 bits)
-- [winget](https://learn.microsoft.com/windows/package-manager/winget/), já incluído no Windows 11, para instalar as dependências
-- Conexão com a internet
+- Windows 10 or 11 (64-bit)
+- [winget](https://learn.microsoft.com/windows/package-manager/winget/), included with Windows 11, to install the dependencies
+- An internet connection
 
-Se o yt-dlp não estiver instalado, o app mostra o botão **Instalar yt-dlp** na barra de ferramentas.
+If yt-dlp is not installed, the app shows an **Install yt-dlp** button in the toolbar.
 
-## Uso
+## Usage
 
-1. Cole um ou mais links no campo **Links**.
-2. Escolha **Vídeo** ou **Áudio** na barra de ferramentas.
-3. Ajuste o formato, a qualidade e as opções no painel à esquerda.
-4. Clique em **Baixar** ou pressione Ctrl+Enter.
+1. Paste one or more links into the **Links** field.
+2. Choose **Video** or **Audio** in the toolbar.
+3. Adjust the format, quality and options in the left panel.
+4. Click **Download** or press Ctrl+Enter.
 
-Os arquivos vão para a pasta de **Destino**, que por padrão é a pasta Downloads. As configurações ficam em `%APPDATA%\yt-downloader\config.json`.
+Files are saved to the **Destination** folder, which defaults to your Downloads folder. Settings are stored in `%APPDATA%\yt-downloader\config.json`.
 
-### Observações
+### Notes
 
-- **Tamanho estimado**: segue a mesma escolha de formato do yt-dlp. Em alguns vídeos o YouTube não informa o tamanho da melhor qualidade (formatos "Premium"); nesse caso o app mostra "Tamanho não informado". Para MP3 VBR e FLAC o valor é aproximado.
-- **Separar por capítulos**: o yt-dlp mantém também o arquivo completo. Os arquivos de cada capítulo recebem o nome certo, mas o título gravado nos metadados é o do vídeo.
-- **Corte de trecho**: o trecho é recodificado para o corte sair exato. Em vídeos 4K isso pode demorar.
+- **Estimated size**: follows the same format choice as yt-dlp. For some videos YouTube doesn't report the size of the best quality ("Premium" formats); in that case the app shows "Size not reported". For MP3 VBR and FLAC the value is approximate.
+- **Split by chapters**: yt-dlp also keeps the full file. Each chapter file gets the right name, but the title stored in its metadata is the video's title.
+- **Clips**: the clip is re-encoded so the cut is exact. For 4K videos this can take a while.
 
-## Desenvolvimento
+## Development
 
-### Ambiente
+### Setup
 
-O projeto usa o toolchain **GNU** do Rust, que dispensa o Visual Studio:
+The project uses Rust's **GNU** toolchain, which doesn't need Visual Studio:
 
 ```bash
 winget install -e --id Rustlang.Rustup
@@ -69,11 +69,11 @@ winget install -e --id yt-dlp.yt-dlp
 rustup default stable-x86_64-pc-windows-gnu
 ```
 
-O MinGW (WinLibs) precisa estar no `PATH` durante a compilação, porque o `dlltool` que vem com o rustup não funciona sozinho. O winget adiciona o MinGW ao PATH; abra um terminal novo depois de instalá-lo.
+MinGW (WinLibs) must be on the `PATH` while building, because the `dlltool` bundled with rustup doesn't work on its own. winget adds MinGW to the PATH; open a new terminal after installing it.
 
-> Com o **Smart App Control** ligado, o Windows bloqueia os executáveis gerados pelo `cargo`, inclusive os scripts de build, e a compilação falha.
+> With **Smart App Control** turned on, Windows blocks the executables produced by `cargo`, including build scripts, and the build fails.
 
-### Compilar e testar
+### Build and test
 
 ```bash
 cargo build --release
@@ -83,11 +83,11 @@ cargo build --release
 cargo test --release
 ```
 
-O executável fica em `target\release\yt-downloader.exe`.
+The executable is written to `target\release\yt-downloader.exe`.
 
-### Gerar o instalador
+### Build the installer
 
-O instalador é feito com o [Inno Setup](https://jrsoftware.org/isinfo.php):
+The installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php):
 
 ```bash
 winget install -e --id JRSoftware.InnoSetup
@@ -97,37 +97,48 @@ winget install -e --id JRSoftware.InnoSetup
 powershell -ExecutionPolicy Bypass -File installer\build.ps1
 ```
 
-O script compila o app em release e gera `dist\YT-Downloader-Setup-<versão>.exe`, com a versão lida do `Cargo.toml`.
+The script builds the app in release mode and creates `dist\YT-Downloader-Setup-<version>.exe`, using the version from `Cargo.toml`.
 
-### Estrutura
+### Layout
 
-| Caminho | Conteúdo |
+| Path | Contents |
 |---|---|
-| `src/main.rs` | Todo o app: interface, montagem dos argumentos do yt-dlp, prévia do link, checagem de versão e testes |
-| `installer/yt-downloader.iss` | Script do Inno Setup (instalação, atalhos, dependências via winget, desinstalação) |
-| `installer/build.ps1` | Compila o app e gera o instalador |
-| `.github/workflows/release.yml` | Gera e publica o instalador ao receber uma tag |
+| `src/main.rs` | The whole app: UI, yt-dlp argument building, link preview, version check and tests |
+| `installer/yt-downloader.iss` | Inno Setup script (install, shortcuts, dependencies via winget, uninstall) |
+| `installer/build.ps1` | Builds the app and the installer |
+| `installer/changelog.ps1` | Builds a Release's notes from the commits since the previous tag |
+| `.github/workflows/release.yml` | Builds and publishes the installer when a tag is pushed |
 
-### Lançar uma versão
+### Releasing a version
 
-O lançamento é automático pelo GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)). Ao receber uma tag `vX.Y.Z`, o fluxo:
+Releases are automated with GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)). When a `vX.Y.Z` tag is pushed, the workflow:
 
-1. confere se a tag bate com a `version` do `Cargo.toml` e, se não bater, para antes de publicar;
-2. roda os testes;
-3. gera o instalador;
-4. publica um **Release** no GitHub com o instalador, o arquivo `SHA256SUMS.txt` e as notas geradas a partir dos commits.
+1. checks that the tag matches the `version` in `Cargo.toml` and stops before publishing if it doesn't;
+2. runs the tests;
+3. builds the installer;
+4. publishes a GitHub **Release** with the installer, a `SHA256SUMS.txt` file and a changelog of the commits since the previous tag.
 
-Para lançar, por exemplo, a versão 0.5.0:
+To release, for example, version 0.8.0:
 
-1. Atualize `version = "0.5.0"` no `Cargo.toml` e rode `cargo build --release` para atualizar o `Cargo.lock`.
-2. Faça o commit e crie a tag:
+1. Set `version = "0.8.0"` in `Cargo.toml` and run `cargo build --release` to update `Cargo.lock`.
+2. Commit, create the tag and push the branch and the tag separately:
 
 ```bash
-git tag -a v0.5.0 -m "v0.5.0"
+git tag -a v0.8.0 -m "v0.8.0"
 ```
 
 ```bash
-git push origin main --follow-tags
+git push origin main
 ```
 
-O andamento aparece na aba **Actions** do repositório, e o instalador em **Releases**.
+```bash
+git push origin v0.8.0
+```
+
+Progress shows up in the repository's **Actions** tab, and the installer under **Releases**.
+
+You can preview a tag's notes locally:
+
+```bash
+powershell -ExecutionPolicy Bypass -File installer\changelog.ps1 -Tag v0.8.0
+```
