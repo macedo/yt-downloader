@@ -1,0 +1,8 @@
+# The Rust version used to build and check the app, locally and in CI.
+# rustup picks it up automatically in this directory. Bump it in a PR when a
+# new stable Rust is out (every 6 weeks), so CI tests the new compiler and
+# clippy lints before they reach the release build.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
