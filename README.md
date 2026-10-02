@@ -18,6 +18,7 @@ The app is a front end for `yt-dlp`: it builds the arguments, tracks progress an
 - **Cover art and metadata** embedded in the file
 - **Save the description** as a `.txt` next to the download (lessons often link tabs, chords and the tuning there)
 - **Skip sponsors** with [SponsorBlock](https://sponsor.ajay.app/): removes sponsor segments, self-promotion, "like and subscribe" reminders and non-music parts of music videos, where the community has marked them (whole videos only)
+- **Updates itself**: when a new version of the app is out, a banner offers **Update and restart**; the app downloads the installer, checks it against the release's SHA-256, installs it and restarts
 - **New yt-dlp version notice** when the app opens, with one-click update
 - Light, dark or system theme (⚙ menu); settings are remembered between sessions
 - Shortcuts: **Ctrl+Enter** downloads, **Esc** cancels
@@ -32,7 +33,7 @@ Download `YT-Downloader-Setup-<version>.exe` from the [Releases](https://github.
 
 - No admin rights needed; it installs for the current user in `%LOCALAPPDATA%\Programs\YT Downloader`.
 - By default it installs or updates the dependencies through **winget**: yt-dlp, FFmpeg and Deno (a JavaScript runtime that some sites require).
-- To update the app, run the newer installer over the current install.
+- The app checks for new versions when it opens and can update itself (see Features). You can also run a newer installer over the current install.
 
 The installer and the app are **not digitally signed**. Because of that:
 

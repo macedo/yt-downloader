@@ -8,6 +8,7 @@ mod logging;
 mod media;
 mod net;
 mod process;
+mod self_update;
 mod settings;
 mod update;
 

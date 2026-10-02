@@ -47,6 +47,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Self-update: the app runs this installer silently with /RESTARTAPP=1 and
+; closes; start the new version once it is installed.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: RestartRequested
 
 [UninstallDelete]
 ; Settings saved by the app. The winget dependencies are kept, since other
@@ -54,6 +57,11 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 Type: filesandordirs; Name: "{userappdata}\yt-downloader"
 
 [Code]
+function RestartRequested(): Boolean;
+begin
+  Result := ExpandConstant('{param:RESTARTAPP|0}') = '1';
+end;
+
 function RunHidden(const Params: String): Integer;
 begin
   if not Exec(ExpandConstant('{cmd}'), '/c ' + Params, '', SW_HIDE, ewWaitUntilTerminated, Result) then
