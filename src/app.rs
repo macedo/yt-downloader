@@ -16,6 +16,9 @@ use crate::media::{
     Chapter, MediaInfo, fetch_media_info, format_count, format_duration, format_size,
 };
 use crate::process::{CREATE_NO_WINDOW, Msg, find_ytdlp, spawn_process};
+use crate::self_update::{
+    AppRelease, UpdateMsg, check_for_update, download_update, run_installer, running_installed_copy,
+};
 use crate::settings::{
     AUDIO_FORMATS, AUDIO_QUALITIES, Mode, Settings, ThemeChoice, VIDEO_QUALITIES,
 };
@@ -102,6 +105,14 @@ pub struct App {
     cut_end: String,
     preview: Preview,
     show_about: bool,
+    /// Background check for a newer release of the app itself.
+    app_update_rx: Option<Receiver<Option<AppRelease>>>,
+    app_update: Option<AppRelease>,
+    app_update_dismissed: bool,
+    /// Download of the new installer, while it runs.
+    app_update_job: Option<Receiver<UpdateMsg>>,
+    /// Whether this is the installed copy, which the installer can update.
+    installed_copy: bool,
 }
 
 impl App {
@@ -139,6 +150,11 @@ impl App {
             cut_end: String::new(),
             preview: Preview::None,
             show_about: false,
+            app_update_rx: Some(check_for_update(cc.egui_ctx.clone())),
+            app_update: None,
+            app_update_dismissed: false,
+            app_update_job: None,
+            installed_copy: running_installed_copy(),
         };
         app.start_version_check();
         app
@@ -503,6 +519,10 @@ impl App {
         let urls = self.urls();
         if urls.is_empty() {
             self.status = "Paste at least one valid link (http/https).".into();
+            return;
+        }
+        if self.app_update_job.is_some() {
+            self.status = "Wait for the app update to finish.".into();
             return;
         }
         let Some(exe) = self.ytdlp.clone() else {
@@ -1061,6 +1081,122 @@ impl App {
         self.show_about = open;
     }
 
+    fn poll_app_update(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.app_update_rx {
+            match rx.try_recv() {
+                Ok(found) => {
+                    if let Some(release) = &found {
+                        logging::write(&format!(
+                            "YT Downloader {} is available (running {})",
+                            release.version,
+                            env!("CARGO_PKG_VERSION")
+                        ));
+                    }
+                    self.app_update = found;
+                    self.app_update_rx = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.app_update_rx = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        let Some(rx) = &self.app_update_job else {
+            return;
+        };
+        let msgs: Vec<UpdateMsg> = rx.try_iter().collect();
+        for msg in msgs {
+            match msg {
+                UpdateMsg::Progress(fraction) => {
+                    self.progress = fraction;
+                    self.status = format!("Downloading the update… {:.0}%", fraction * 100.0);
+                }
+                UpdateMsg::Ready(path) => {
+                    self.app_update_job = None;
+                    logging::write("Update downloaded and verified; starting the installer");
+                    match run_installer(&path) {
+                        Ok(()) => {
+                            // The installer replaces this exe and starts the new one.
+                            self.status = "Installing the update; the app will restart…".into();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(e) => {
+                            self.status = format!("Couldn't start the installer: {e}");
+                            logging::write(&self.status.clone());
+                        }
+                    }
+                    return;
+                }
+                UpdateMsg::Failed(e) => {
+                    self.app_update_job = None;
+                    self.progress = 0.0;
+                    self.status = format!("Update failed: {e}");
+                    logging::write(&self.status.clone());
+                    return;
+                }
+            }
+        }
+    }
+
+    fn start_app_update(&mut self) {
+        let Some(release) = self.app_update.clone() else {
+            return;
+        };
+        logging::write(&format!("Downloading YT Downloader {}", release.version));
+        self.progress = 0.0;
+        self.status = "Downloading the update…".into();
+        self.app_update_job = Some(download_update(release, self.egui_ctx.clone()));
+    }
+
+    fn app_update_banner(&mut self, ui: &mut egui::Ui) {
+        let Some(release) = self.app_update.clone() else {
+            return;
+        };
+        let busy = self.job.is_some();
+        let downloading = self.app_update_job.is_some();
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("YT Downloader {} is available", release.version))
+                    .strong(),
+            );
+            ui.label(concat!("(you have ", env!("CARGO_PKG_VERSION"), ")"));
+            ui.hyperlink_to("What's new", &release.notes_url);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if downloading {
+                    ui.spinner();
+                    ui.weak("Downloading the update…");
+                    return;
+                }
+                if ui.small_button("✖").on_hover_text("Dismiss").clicked() {
+                    self.app_update_dismissed = true;
+                }
+                if self.installed_copy {
+                    if ui
+                        .add_enabled(!busy, egui::Button::new("⬇  Update and restart"))
+                        .on_hover_text(
+                            "Downloads the new version, checks it against the release's \
+                             SHA-256 and installs it; the app restarts by itself",
+                        )
+                        .on_disabled_hover_text("Wait for the current download to finish")
+                        .clicked()
+                    {
+                        self.start_app_update();
+                    }
+                } else if ui
+                    .button("Open the release page")
+                    .on_hover_text(
+                        "This copy wasn't installed with the installer, so it can't update \
+                         itself; download the new installer from the release page",
+                    )
+                    .clicked()
+                {
+                    ui.ctx()
+                        .open_url(egui::OpenUrl::new_tab(&release.notes_url));
+                }
+            });
+        });
+    }
+
     fn update_banner(&mut self, ui: &mut egui::Ui) {
         let latest = self.update_available.clone().unwrap_or_default();
         let installed = self.ytdlp_version.clone().unwrap_or_default();
@@ -1089,9 +1225,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_job();
         self.poll_version_check();
+        self.poll_app_update(ui.ctx());
         self.handle_input(ui.ctx());
         self.update_preview(ui.input(|i| i.time));
         if self.job.is_some()
+            || self.app_update_job.is_some()
             || matches!(
                 self.preview,
                 Preview::Waiting { .. } | Preview::Loading { .. }
@@ -1110,6 +1248,17 @@ impl eframe::App for App {
                 egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)),
             )
             .show(ui, |ui| self.toolbar(ui));
+        if self.app_update.is_some()
+            && (!self.app_update_dismissed || self.app_update_job.is_some())
+        {
+            egui::Panel::top("app_update_banner")
+                .frame(
+                    egui::Frame::new()
+                        .fill(ui.visuals().selection.bg_fill.gamma_multiply(0.25))
+                        .inner_margin(egui::Margin::symmetric(10, 6)),
+                )
+                .show(ui, |ui| self.app_update_banner(ui));
+        }
         let updating = self
             .job
             .as_ref()
