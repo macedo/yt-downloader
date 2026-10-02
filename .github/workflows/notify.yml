@@ -1,0 +1,56 @@
+# Sends a Telegram message when someone opens (or reopens) an issue or a pull
+# request. Needs two repository secrets (Settings > Secrets and variables >
+# Actions): TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Without them it does
+# nothing. Run it by hand from the Actions tab to send a test message.
+name: Notify
+
+on:
+  issues:
+    types: [opened, reopened]
+  # pull_request_target, so pull requests from forks also get the secrets.
+  # Safe here: this job never checks out or runs the pull request's code.
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    # Skip the owner's own issues and pull requests (including the ones opened
+    # with their account by tools). Remove this line to be notified of those too.
+    if: github.event_name == 'workflow_dispatch' || github.event.sender.login != github.repository_owner
+    steps:
+      - name: Send the message
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          AUTHOR: ${{ github.event.sender.login }}
+          REPO: ${{ github.repository }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "::warning::TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set; nothing sent."
+            exit 0
+          fi
+          case "$EVENT" in
+            issues)
+              text=$(printf 'New issue (%s) in %s by %s:\n%s\n%s' \
+                "$ACTION" "$REPO" "$AUTHOR" "$ISSUE_TITLE" "$ISSUE_URL") ;;
+            pull_request_target)
+              text=$(printf 'New pull request (%s) in %s by %s:\n%s\n%s' \
+                "$ACTION" "$REPO" "$AUTHOR" "$PR_TITLE" "$PR_URL") ;;
+            *)
+              text="Test message from $REPO: Telegram notifications work." ;;
+          esac
+          curl -sS --fail-with-body -o /dev/null -X POST \
+            "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            --data-urlencode "disable_web_page_preview=true"
