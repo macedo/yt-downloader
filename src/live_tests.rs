@@ -22,11 +22,11 @@
 //! the PATH are used.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::args::{Part, download_args};
 use crate::media::parse_media_info;
+use crate::process::background_command;
 use crate::settings::{AUDIO_FORMATS, Mode, Settings, VIDEO_QUALITIES};
 
 /// Long-lived YouTube videos with different format sets: an old 240p video,
@@ -52,7 +52,8 @@ fn tool(env: &str, default: &str) -> String {
 /// confirm we're not a bot, which says nothing about this app.
 fn ytdlp(args: &[String]) -> Result<Option<String>, String> {
     let exe = tool("YTDLP", "yt-dlp");
-    let out = Command::new(&exe)
+    // No console window per process: the tests start dozens of them.
+    let out = background_command(Path::new(&exe))
         .args(args)
         .output()
         .map_err(|e| format!("could not run {exe}: {e}"))?;
@@ -79,7 +80,7 @@ fn sample_video_url() -> &'static str {
     static URL: OnceLock<String> = OnceLock::new();
     URL.get_or_init(|| {
         let path = temp_dir("sample").join("sample.mp4");
-        let status = Command::new(tool("FFMPEG", "ffmpeg"))
+        let status = background_command(Path::new(&tool("FFMPEG", "ffmpeg")))
             .args(["-v", "error", "-f", "lavfi", "-i"])
             .arg("testsrc=duration=5:size=320x240:rate=25")
             .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=5"])
