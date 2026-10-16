@@ -15,6 +15,9 @@ $range = if ($previous) { "$previous..$Tag" } else { $Tag }
 $changes = @(git log $range --no-merges --reverse --format='- %s (%h)' |
     Where-Object { $_ -notmatch '^- v\d+\.\d+\.\d+ \(' })
 if ($LASTEXITCODE -ne 0) { throw "git log failed for $range" }
+# Some subjects start with a byte order mark (a message file written by
+# Windows PowerShell); it is invisible but would end up in the notes.
+$changes = @($changes | ForEach-Object { $_.Replace([string][char]0xFEFF, '') })
 if ($changes.Count -eq 0) { $changes = @('- No changes besides the version.') }
 
 $version = $Tag.TrimStart('v')
