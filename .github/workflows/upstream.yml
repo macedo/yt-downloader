@@ -41,10 +41,13 @@ jobs:
           $bin = Join-Path $env:RUNNER_TEMP 'bin'
           New-Item -ItemType Directory -Force $bin | Out-Null
           Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile (Join-Path $bin 'yt-dlp.exe')
+          # FFmpeg from yt-dlp's own builds (the ones it recommends), also on
+          # GitHub: the Chocolatey feed sometimes refuses CI runners.
+          $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+          Invoke-WebRequest https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip -OutFile $zip
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'ffmpeg-master-latest-win64-gpl\bin\*.exe') $bin
           Add-Content $env:GITHUB_PATH $bin
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-              choco install ffmpeg -y --no-progress
-          }
 
       - name: Tool versions
         shell: pwsh
