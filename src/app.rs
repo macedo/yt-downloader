@@ -9,7 +9,7 @@ use eframe::egui;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::args::Part;
+use crate::args::{INVALID_FILE_NAME_CHARS, Part};
 use crate::clip::parse_time;
 use crate::logging;
 use crate::media::{
@@ -103,6 +103,9 @@ pub struct App {
     cut_enabled: bool,
     cut_start: String,
     cut_end: String,
+    /// Optional name for the downloaded file, typed in the link preview.
+    /// Empty: named after the video title. Cleared when the link changes.
+    file_name: String,
     preview: Preview,
     show_about: bool,
     /// Background check for a newer release of the app itself.
@@ -148,6 +151,7 @@ impl App {
             cut_enabled: false,
             cut_start: String::new(),
             cut_end: String::new(),
+            file_name: String::new(),
             preview: Preview::None,
             show_about: false,
             app_update_rx: Some(check_for_update(cc.egui_ctx.clone())),
@@ -174,7 +178,11 @@ impl App {
             _ => None,
         };
         if wanted.as_ref() != self.preview.key() {
-            // Link changed: drop the previous preview (an in-flight lookup is ignored).
+            // Link changed: drop the previous preview (an in-flight lookup is
+            // ignored) and the name typed for the previous link.
+            if wanted.as_ref().map(|k| &k.0) != self.preview.key().map(|k| &k.0) {
+                self.file_name.clear();
+            }
             self.preview = match wanted {
                 Some(key) => Preview::Waiting { key, since: now },
                 None => Preview::None,
@@ -237,7 +245,40 @@ impl App {
                     Preview::Ready { info, picked, .. } => self.media_info_view(ui, info, picked),
                 }
                 self.chapter_list(ui);
+                self.file_name_field(ui);
             });
+    }
+
+    /// Optional name for the download; empty keeps the video title.
+    fn file_name_field(&mut self, ui: &mut egui::Ui) {
+        let hint = match &self.preview {
+            Preview::Ready { info, .. } => info.title.clone(),
+            _ => "Video title".to_owned(),
+        };
+        let playlist = matches!(&self.preview, Preview::Ready { info, .. }
+            if info.playlist_count.is_some());
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label("File name");
+            let edit = ui.add_enabled(
+                self.job.is_none(),
+                egui::TextEdit::singleline(&mut self.file_name)
+                    .id_salt("file_name")
+                    .desired_width(ui.available_width())
+                    .hint_text(hint),
+            );
+            if edit.changed() {
+                // Characters Windows doesn't allow in names just don't get typed.
+                self.file_name
+                    .retain(|c| !c.is_control() && !INVALID_FILE_NAME_CHARS.contains(c));
+            }
+            edit.on_hover_text(if playlist {
+                "Optional. Each video of the playlist gets this name and its number."
+            } else {
+                "Optional. Leave empty to name the file after the video title. \
+                 The extension is added automatically."
+            });
+        });
     }
 
     /// Chapters of the previewed video: pick some to download only those (one
@@ -537,7 +578,9 @@ impl App {
             self.status = format!("Couldn't create the destination folder: {e}");
             return;
         }
-        let args = crate::args::download_args(&self.settings, &self.part(), &urls);
+        // The name field belongs to the preview, which only exists for a single link.
+        let name = (urls.len() == 1).then_some(self.file_name.as_str());
+        let args = crate::args::download_args_named(&self.settings, &self.part(), name, &urls);
         self.log.clear();
         self.push_log(format!("> yt-dlp {}", args.join(" ")));
         self.progress = 0.0;

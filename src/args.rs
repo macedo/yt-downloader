@@ -23,18 +23,40 @@ pub enum Part {
 }
 
 /// Arguments for downloading `part` of each of `urls` with yt-dlp, using the
-/// given settings.
+/// given settings, with files named after the video title.
+#[cfg(test)]
 pub fn download_args(s: &Settings, part: &Part, urls: &[String]) -> Vec<String> {
+    download_args_named(s, part, None, urls)
+}
+
+/// Like [`download_args`], but files are named `name` instead of after the
+/// video title when a name is given (see [`clean_file_name`]).
+pub fn download_args_named(
+    s: &Settings,
+    part: &Part,
+    name: Option<&str>,
+    urls: &[String],
+) -> Vec<String> {
+    let custom = name.and_then(clean_file_name);
+    let base = match &custom {
+        // A literal name for every item of a playlist would make them all the
+        // same file: number them ("Backing track - 2"). Empty for a lone video.
+        Some(n) if s.playlist => format!("{}%(playlist_index& - {{}}|)s", template_literal(n)),
+        Some(n) => template_literal(n),
+        None => "%(title)s".to_owned(),
+    };
     let output = match part {
-        Part::Whole => "%(title)s.%(ext)s".to_owned(),
+        Part::Whole => format!("{base}.%(ext)s"),
+        // A chosen name is used as is, without the clip range.
+        Part::Clip { .. } if custom.is_some() => format!("{base}.%(ext)s"),
         Part::Clip { start, end } => format!(
-            "%(title)s (clip {}-{}).%(ext)s",
+            "{base} (clip {}-{}).%(ext)s",
             format_time(*start),
             end.map_or("end".to_owned(), format_time)
         ),
         // section_number is 0-based: "Lesson - 02 - Solo.mp3".
         Part::Chapters(_) => {
-            "%(title)s - %(section_number+1)02d - %(section_title)s.%(ext)s".to_owned()
+            format!("{base} - %(section_number+1)02d - %(section_title)s.%(ext)s")
         }
     };
     let mut a: Vec<String> =
@@ -120,7 +142,7 @@ pub fn download_args(s: &Settings, part: &Part, urls: &[String]) -> Vec<String> 
             a.extend([
                 "--split-chapters".into(),
                 "-o".into(),
-                "chapter:%(title)s/%(section_number)02d - %(section_title)s.%(ext)s".into(),
+                format!("chapter:{base}/%(section_number)02d - %(section_title)s.%(ext)s"),
             ]);
         }
         Part::Whole => {}
@@ -132,7 +154,7 @@ pub fn download_args(s: &Settings, part: &Part, urls: &[String]) -> Vec<String> 
         a.extend([
             "--print-to-file".into(),
             "%(description|)s".into(),
-            "%(title)s - description.txt".into(),
+            format!("{base} - description.txt"),
         ]);
     }
 
@@ -148,6 +170,44 @@ pub fn download_args(s: &Settings, part: &Part, urls: &[String]) -> Vec<String> 
     a.push("--".into());
     a.extend(urls.iter().cloned());
     a
+}
+
+/// Characters Windows doesn't allow in file names.
+pub const INVALID_FILE_NAME_CHARS: &str = r#"\/:*?"<>|"#;
+
+/// Extensions the app's downloads can end in; typing one in the name is
+/// harmless, yt-dlp adds the real one.
+const MEDIA_EXTENSIONS: &[&str] = &["mp4", "mp3", "m4a", "opus", "flac", "wav", "ogg", "webm"];
+
+/// A name typed by the user, made safe as a Windows file name: invalid and
+/// control characters removed, a typed media extension dropped, no leading or
+/// trailing spaces nor trailing dots, and reserved device names (CON, NUL…)
+/// avoided. None when nothing usable is left (the video title is used).
+pub fn clean_file_name(name: &str) -> Option<String> {
+    let mut n: String = name
+        .chars()
+        .filter(|c| !c.is_control() && !INVALID_FILE_NAME_CHARS.contains(*c))
+        .collect();
+    if let Some((stem, ext)) = n.rsplit_once('.')
+        && MEDIA_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+    {
+        n = stem.to_owned();
+    }
+    let n = n.trim().trim_end_matches(['.', ' ']).to_owned();
+    if n.is_empty() {
+        return None;
+    }
+    let upper = n.to_ascii_uppercase();
+    let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.as_bytes()[3].is_ascii_digit());
+    Some(if reserved { format!("{n}_") } else { n })
+}
+
+/// `text` as literal text in a yt-dlp output template.
+fn template_literal(text: &str) -> String {
+    text.replace('%', "%%")
 }
 
 /// Escapes the characters that are special in Python regular expressions
@@ -167,7 +227,7 @@ fn regex_escape(text: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Part, download_args};
+    use super::{Part, clean_file_name, download_args, download_args_named};
     use crate::settings::{AUDIO_FORMATS, AUDIO_QUALITIES, Mode, Settings, VIDEO_QUALITIES};
 
     fn settings(mode: Mode) -> Settings {
@@ -456,6 +516,82 @@ mod tests {
         ] {
             let args = download_args(&s, &part, &urls(&["https://a"]));
             assert!(!has(&args, "--sponsorblock-remove"), "{part:?}");
+        }
+    }
+
+    #[test]
+    fn file_name_is_cleaned_for_windows() {
+        assert_eq!(clean_file_name("Blues in A"), Some("Blues in A".into()));
+        assert_eq!(
+            clean_file_name(r#"  AC/DC: Back in Black? <solo> "live" | 2  "#),
+            Some("ACDC Back in Black solo live  2".into())
+        );
+        assert_eq!(
+            clean_file_name("Backing track.MP3"),
+            Some("Backing track".into())
+        );
+        assert_eq!(clean_file_name("Lesson 1.5"), Some("Lesson 1.5".into()));
+        assert_eq!(clean_file_name("Take five..."), Some("Take five".into()));
+        assert_eq!(clean_file_name("con"), Some("con_".into()));
+        assert_eq!(clean_file_name("COM1"), Some("COM1_".into()));
+        assert_eq!(clean_file_name("Combo"), Some("Combo".into()));
+        for empty in ["", "   ", "???", ".mp4", "..."] {
+            assert_eq!(clean_file_name(empty), None, "{empty:?}");
+        }
+    }
+
+    #[test]
+    fn chosen_name_replaces_the_title_everywhere() {
+        let mut s = settings(Mode::Audio);
+        s.split_chapters = true;
+        s.write_description = true;
+        let name = Some("Blues 100% shuffle");
+        let args = download_args_named(&s, &Part::Whole, name, &urls(&["https://a"]));
+        assert_eq!(
+            values_after(&args, "-o"),
+            [
+                "Blues 100%% shuffle.%(ext)s",
+                "chapter:Blues 100%% shuffle/%(section_number)02d - %(section_title)s.%(ext)s",
+            ]
+        );
+        let at = args.iter().position(|a| a == "--print-to-file").unwrap();
+        assert_eq!(args[at + 2], "Blues 100%% shuffle - description.txt");
+
+        let clip = Part::Clip {
+            start: 10,
+            end: Some(20),
+        };
+        let args = download_args_named(&s, &clip, name, &urls(&["https://a"]));
+        assert_eq!(values_after(&args, "-o"), ["Blues 100%% shuffle.%(ext)s"]);
+
+        let chapters = Part::Chapters(vec!["Solo".into()]);
+        let args = download_args_named(&s, &chapters, name, &urls(&["https://a"]));
+        assert_eq!(
+            values_after(&args, "-o"),
+            ["Blues 100%% shuffle - %(section_number+1)02d - %(section_title)s.%(ext)s"]
+        );
+    }
+
+    #[test]
+    fn chosen_name_is_numbered_for_playlists() {
+        let mut s = settings(Mode::Video);
+        s.playlist = true;
+        let args = download_args_named(&s, &Part::Whole, Some("Track"), &urls(&["https://a"]));
+        assert_eq!(
+            values_after(&args, "-o"),
+            ["Track%(playlist_index& - {}|)s.%(ext)s"]
+        );
+    }
+
+    #[test]
+    fn empty_or_unusable_name_keeps_the_title() {
+        let s = settings(Mode::Video);
+        for name in [None, Some(""), Some("  "), Some("???")] {
+            assert_eq!(
+                download_args_named(&s, &Part::Whole, name, &urls(&["https://a"])),
+                download_args(&s, &Part::Whole, &urls(&["https://a"])),
+                "{name:?}"
+            );
         }
     }
 }
