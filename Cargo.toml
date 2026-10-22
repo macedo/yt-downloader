@@ -8,7 +8,7 @@ repository = "https://github.com/macedo/yt-downloader"
 [dependencies]
 dirs = "7.0.0"
 eframe = "0.36.2"
-egui_extras = { version = "0.36.2", features = ["image"] }
+egui_extras = { version = "0.37.0", features = ["image"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 rfd = "0.17.2"
 serde = { version = "1.0.229", features = ["derive"] }
