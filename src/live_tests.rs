@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::args::{Part, download_args};
+use crate::args::{Part, download_args, download_args_named};
 use crate::media::parse_media_info;
 use crate::process::background_command;
 use crate::settings::{AUDIO_FORMATS, Mode, Settings, VIDEO_QUALITIES};
@@ -185,6 +185,65 @@ fn tools_ytdlp_accepts_download_args() {
         "yt-dlp rejected the app's download arguments:\n{}",
         failures.join("\n\n")
     );
+}
+
+#[test]
+#[ignore = "needs yt-dlp and FFmpeg"]
+fn tools_chosen_file_name_is_used() {
+    // (label, settings, name typed in the app, expected files)
+    let cases: [(&str, Settings, &str, &[&str]); 2] = [
+        (
+            "audio with description, name with %",
+            Settings {
+                write_description: true,
+                audio_format: audio_format("mp3"),
+                ..settings(Mode::Audio, Path::new(""))
+            },
+            "Blues 100% shuffle.mp3",
+            &[
+                "Blues 100% shuffle - description.txt",
+                "Blues 100% shuffle.mp3",
+            ][..],
+        ),
+        (
+            // A single video with playlists on: no number after the name.
+            "video, playlists on",
+            Settings {
+                playlist: true,
+                ..settings(Mode::Video, Path::new(""))
+            },
+            "Track: take 2?",
+            &["Track take 2.mp4"][..],
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (i, (label, s, name, expected)) in cases.into_iter().enumerate() {
+        let out = temp_dir(&format!("named-{i}"));
+        let s = Settings {
+            out_dir: out.clone(),
+            ..s
+        };
+        let mut args = download_args_named(
+            &s,
+            &Part::Whole,
+            Some(name),
+            &[sample_video_url().to_owned()],
+        );
+        args.insert(0, "--enable-file-urls".to_owned());
+        if let Err(e) = ytdlp(&args) {
+            failures.push(format!("[{label}] {e}"));
+            continue;
+        }
+        let mut files: Vec<String> = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        if files != expected {
+            failures.push(format!("[{label}] expected {expected:?}, got {files:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
 #[test]
