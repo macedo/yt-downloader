@@ -955,7 +955,9 @@ impl App {
             });
 
             ui.add_space(16.0);
-            section(ui, "🗀  Destination");
+            // An emoji that Segoe UI Emoji has: since egui 0.37 icons come from
+            // the system emoji font, and "🗀" (U+1F5C0) showed as a box.
+            section(ui, "📁  Destination");
             ui.add(egui::Label::new(self.settings.out_dir.display().to_string()).wrap());
             ui.add_space(4.0);
             ui.horizontal(|ui| {
